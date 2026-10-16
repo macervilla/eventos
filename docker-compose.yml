@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-eventos}
+      POSTGRES_USER: ${POSTGRES_USER:-eventos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventos}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eventos} -d ${POSTGRES_DB:-eventos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    env_file:
+      - .env.example
+      - C:/xampp/htdocs/mpcss/.env
+      - C:/xampp/htdocs/idiomas/.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://eventos:eventos@db:5432/eventos}
+    volumes:
+      - ./backend:/app
+      - media_data:/app/media
+    ports:
+      - "8009:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5179:5179"
+    environment:
+      VITE_API_URL: http://localhost:8009
+      MEDIA_PROXY_TARGET: http://backend:8000
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  media_data:
