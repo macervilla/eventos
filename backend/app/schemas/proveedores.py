@@ -3,7 +3,8 @@ import re
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, field_validator, model_validator
 
 from app.models.enums import Plan
-from app.schemas.portada import EncuadrePortada
+from app.schemas.portada import ColoresTextosPortada, EncuadrePortada, TextosPortada
+from app.schemas.geografia import ReferenciaGeograficaSchema
 
 
 class CategoriaProveedorRead(BaseModel):
@@ -14,7 +15,7 @@ class CategoriaProveedorRead(BaseModel):
     slug: str
 
 
-class ProveedorBase(BaseModel):
+class ProveedorBase(ReferenciaGeograficaSchema):
     nombre_comercial: str = Field(min_length=2, max_length=180)
     slug: str = Field(min_length=1, max_length=220)
     cuit: str | None = Field(default=None, max_length=20)
@@ -89,7 +90,7 @@ class ProveedorBase(BaseModel):
     @model_validator(mode="after")
     def validate_required_business_fields(self) -> "ProveedorBase":
         required = {
-            "provincia": self.provincia,
+            "provincia": self.provincia or self.geoname_id,
             "localidad": self.localidad,
             "direccion": self.direccion,
             "email": self.email,
@@ -109,6 +110,13 @@ class ProveedorEmailRequest(BaseModel):
     token_alta: str | None = None
 
 
+class ProveedorTextosPortada(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    textos_portada: TextosPortada
+    colores_textos: ColoresTextosPortada
+
+
 class ProveedorRead(ProveedorBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -116,11 +124,16 @@ class ProveedorRead(ProveedorBase):
     usuario_id: int
     slug: str
     portada_encuadre: EncuadrePortada | None = None
+    textos_portada: TextosPortada | None = None
+    colores_textos: ColoresTextosPortada = Field(default_factory=ColoresTextosPortada)
     distancia_km: float | None = None
     categorias_detalle: list[CategoriaProveedorRead] = Field(default_factory=list)
 
 
 class ProveedorCreado(ProveedorRead):
+    error_correo: str | None = None
+    bienvenida_enviada: bool = False
+    email_validado: bool = False
     token_alta: str
 
 

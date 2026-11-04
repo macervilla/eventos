@@ -1,0 +1,53 @@
+# Archivo independiente: usar -f compose.vps.yml, sin combinar con el de desarrollo.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: eventos
+      POSTGRES_USER: eventos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configurar POSTGRES_PASSWORD en .env.vps}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventos -d eventos"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env.vps
+    environment:
+      DATABASE_URL: postgresql+psycopg://eventos:${POSTGRES_PASSWORD:?Configurar POSTGRES_PASSWORD}@db:5432/eventos
+      SECRET_KEY: ${SECRET_KEY:?Configurar SECRET_KEY en .env.vps}
+      FRONTEND_PUBLIC_URL: https://acersistemas.site/eventos
+      BACKEND_CORS_ORIGINS: https://acersistemas.site
+      MEDIA_ROOT: /app/media
+      MEDIA_PUBLIC_BASE: /media
+    ports:
+      - "127.0.0.1:8009:8000"
+    volumes:
+      - media_data:/app/media
+      - ./frontend/dist:/app/frontend-dist:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  frontend-build:
+    image: node:22-alpine
+    profiles: [tools]
+    working_dir: /app
+    environment:
+      VITE_API_URL: /eventos/api
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    command: sh -c "npm ci && npm run build -- --base=/eventos/"
+
+volumes:
+  postgres_data:
+  media_data:
+  frontend_node_modules:

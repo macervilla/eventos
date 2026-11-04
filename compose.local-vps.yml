@@ -1,0 +1,9 @@
+# Override LOCAL: el frontend usa la API y los archivos del VPS.
+# Los cambios de datos realizados en localhost se guardan en produccion.
+# docker compose -f docker-compose.yml -f compose.local-vps.yml up -d --no-deps --force-recreate frontend
+services:
+  frontend:
+    environment:
+      VITE_API_URL: /api-vps
+      VPS_API_TARGET: https://acersistemas.site/eventos/api
+      MEDIA_PROXY_TARGET: https://acersistemas.site/eventos/api

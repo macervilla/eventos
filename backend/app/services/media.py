@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import MediaEstado, MediaTipo
-from app.models.eventos import Evento
+from app.models.eventos import Evento, EventoModulo
 from app.models.interacciones import Media
 from app.models.proveedores import Proveedor
 from app.schemas.media import MediaRead
@@ -105,27 +105,41 @@ async def upload_provider_media(
     return media
 
 
-async def upload_event_cover(db: Session, *, evento: Evento, file: UploadFile) -> Media:
-    for item in db.scalars(
+async def upload_event_cover(db: Session, *, evento: Evento, file: UploadFile,
+                             tipo: MediaTipo = MediaTipo.PORTADA, reemplazar_id: int | None = None,
+                             usuario_id: int | None = None) -> Media:
+    # Serializar altas/reemplazos por evento para respetar el limite del plan.
+    db.scalar(select(Evento).where(Evento.id == evento.id).with_for_update())
+    existentes = list(db.scalars(
         select(Media).where(
             Media.evento_id == evento.id,
-            Media.tipo == MediaTipo.PORTADA,
+            Media.tipo == tipo,
             Media.activo.is_(True),
         )
-    ).all():
-        item.activo = False
+    ).all())
+    reemplazada = next((m for m in existentes if m.id == reemplazar_id), None)
+    if reemplazar_id is not None and reemplazada is None:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada en este evento")
+    limite = MEDIA_LIMITS.get(evento.plan.value, MEDIA_LIMITS["GRATIS"])[tipo]
+    if tipo == MediaTipo.GALERIA:
+        limite = min(limite, 10)
+    if tipo == MediaTipo.GALERIA and reemplazada is None and len(existentes) >= limite:
+        raise HTTPException(status_code=400, detail="Limite de imagenes del plan alcanzado")
 
     stored = await media_storage.save_image(
         file,
         owner="eventos",
         owner_uuid=str(evento.uuid),
-        kind="portada",
+        kind=_kind_for_media_type(tipo),
     )
+    for item in existentes:
+        if tipo == MediaTipo.PORTADA or item is reemplazada:
+            item.activo = False
     media = Media(
         evento_id=evento.id,
         usuario_id=evento.propietario_id,
-        uploaded_by=evento.propietario_id,
-        tipo=MediaTipo.PORTADA,
+        uploaded_by=usuario_id or evento.propietario_id,
+        tipo=tipo,
         storage_provider=media_storage.provider,
         object_key=stored.object_key,
         url=stored.public_url,
@@ -137,8 +151,16 @@ async def upload_event_cover(db: Session, *, evento: Evento, file: UploadFile) -
         orden=0,
     )
     db.add(media)
-    evento.portada_url = stored.public_url
-    evento.portada_encuadre = None
+    if tipo == MediaTipo.PORTADA:
+        evento.portada_url = stored.public_url
+        evento.portada_encuadre = None
+    elif tipo == MediaTipo.GALERIA:
+        modulo = db.scalar(select(EventoModulo).where(
+            EventoModulo.evento_id == evento.id, EventoModulo.modulo == "galeria"))
+        if modulo is None:
+            db.add(EventoModulo(evento_id=evento.id, modulo="galeria", activo=True, configuracion_json={}))
+        else:
+            modulo.activo = True
     db.commit()
     db.refresh(media)
     return media

@@ -1,8 +1,9 @@
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    geo_max_resultados: int = Field(default=30, ge=10, le=100, alias="GEO_MAX_RESULTADOS")
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = Field(
@@ -44,9 +45,17 @@ class Settings(BaseSettings):
     )
     zona_horaria: str = Field(default="America/Argentina/Buenos_Aires", alias="ZONA_HORARIA")
     google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
+    google_clock_skew_seconds: int = Field(default=5, ge=0, le=30, alias="GOOGLE_CLOCK_SKEW_SECONDS")
     media_root: str = Field(default="/app/media", alias="MEDIA_ROOT")
     media_public_base: str = Field(default="/media", alias="MEDIA_PUBLIC_BASE")
     max_upload_bytes: int = Field(default=5 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
+
+    @field_validator("google_client_id", mode="before")
+    @classmethod
+    def normalizar_google_client_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
     @property
     def cors_origins(self) -> list[str]:

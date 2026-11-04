@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.seguridad import (
     crear_token_alta,
     exigir_duenio_proveedor,
     obtener_usuario_actual,
+    obtener_usuario_opcional,
     validar_token_alta,
 )
 from app.db.session import get_db
@@ -16,6 +17,7 @@ from app.schemas.proveedores import (
     ProveedorCreate,
     ProveedorEmailRequest,
     ProveedorRead,
+    ProveedorTextosPortada,
 )
 from app.services.proveedores import (
     create_proveedor,
@@ -27,6 +29,7 @@ from app.services.proveedores import (
     soft_delete_proveedor,
     update_proveedor,
 )
+from app.services.bienvenida import enviar_bienvenida_una_vez
 
 router = APIRouter(prefix="/proveedores", tags=["proveedores"])
 
@@ -36,6 +39,7 @@ def list_proveedores(
     categoria: str | None = None,
     localidad: str | None = None,
     provincia: str | None = None,
+    codigo_pais: str | None = Query(default=None, pattern=r"^[A-Z]{2}$"),
     nombre: str | None = None,
     plan: Plan | None = None,
     lat: float | None = Query(default=None, ge=-90, le=90),
@@ -48,6 +52,7 @@ def list_proveedores(
         categoria=categoria,
         localidad=localidad,
         provincia=provincia,
+        codigo_pais=codigo_pais,
         nombre=nombre,
         plan=plan,
         lat=lat,
@@ -60,9 +65,19 @@ def list_proveedores(
 def create_proveedor_endpoint(
     data: ProveedorCreate,
     db: Session = Depends(get_db),
+    usuario: User | None = Depends(obtener_usuario_opcional),
 ) -> ProveedorCreado:
-    proveedor = create_proveedor(db, data)
+    proveedor = create_proveedor(db, data, usuario)
+    propietario = db.get(User, proveedor.usuario_id)
+    error_correo = None
+    try:
+        enviada = enviar_bienvenida_una_vez(db, propietario, f"/p/{proveedor.slug}")
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        enviada, error_correo = False, str(exc.detail)
     return ProveedorCreado(
+        bienvenida_enviada=enviada, email_validado=bool(propietario.email_validado_en), error_correo=error_correo,
         **proveedor_to_read(proveedor).model_dump(),
         token_alta=crear_token_alta(proveedor.slug),
     )
@@ -83,6 +98,21 @@ def update_proveedor_endpoint(
 ) -> ProveedorRead:
     exigir_duenio_proveedor(db, slug, usuario)
     proveedor = update_proveedor(db, slug, data)
+    return proveedor_to_read(proveedor)
+
+
+@router.put("/{slug}/textos-portada", response_model=ProveedorRead)
+def guardar_textos_portada_endpoint(
+    slug: str,
+    data: ProveedorTextosPortada,
+    db: Session = Depends(get_db),
+    usuario: User = Depends(obtener_usuario_actual),
+) -> ProveedorRead:
+    proveedor = exigir_duenio_proveedor(db, slug, usuario)
+    proveedor.textos_portada = data.textos_portada.model_dump()
+    proveedor.colores_textos = data.colores_textos.model_dump()
+    db.commit()
+    db.refresh(proveedor)
     return proveedor_to_read(proveedor)
 
 

@@ -1,3 +1,4 @@
+import type { ColoresTextos, TextosPortada } from "../components/TextosPortada";
 import type { EncuadrePortada } from "../components/PortadaAjustable";
 
 export type Plan = "GRATIS" | "PREMIUM";
@@ -9,6 +10,8 @@ export interface CategoriaProveedor {
 }
 
 export interface Proveedor {
+  geoname_id?: number | null;
+  codigo_pais?: string | null;
   id: number;
   usuario_id: number;
   nombre_comercial: string;
@@ -35,6 +38,8 @@ export interface Proveedor {
   logo_url?: string | null;
   portada_url?: string | null;
   portada_encuadre?: EncuadrePortada | null;
+  textos_portada?: TextosPortada | null;
+  colores_textos?: ColoresTextos;
   horarios?: string | null;
   template_key: string;
   plan: Plan;

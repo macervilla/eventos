@@ -6,9 +6,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.models.enums import Plan
 from app.models.mixins import SoftDeleteMixin, TimestampMixin
+from app.models.geografia import ReferenciaGeografica
 
 
-class Proveedor(SoftDeleteMixin, TimestampMixin, Base):
+class Proveedor(ReferenciaGeografica, SoftDeleteMixin, TimestampMixin, Base):
     __tablename__ = "proveedores"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -36,6 +37,8 @@ class Proveedor(SoftDeleteMixin, TimestampMixin, Base):
     logo_url: Mapped[str | None] = mapped_column(Text)
     portada_url: Mapped[str | None] = mapped_column(Text)
     portada_encuadre: Mapped[dict | None] = mapped_column(JSON)
+    textos_portada: Mapped[dict | None] = mapped_column(JSON)
+    colores_textos: Mapped[dict | None] = mapped_column(JSON)
     horarios: Mapped[str | None] = mapped_column(Text)
     template_key: Mapped[str] = mapped_column(String(60), default="professional", nullable=False)
     plan: Mapped[Plan] = mapped_column(Enum(Plan, name="proveedor_plan"), default=Plan.GRATIS)

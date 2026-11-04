@@ -1,7 +1,9 @@
 import { Crosshair, MapPin, Search } from "lucide-react";
 import { FormEvent, useState } from "react";
 
-import { DEFAULT_LOCATION, QueryLocation } from "../types/location";
+import { QueryLocation } from "../types/location";
+
+import { GeografiaValor, LocalidadAutocomplete } from "./LocalidadAutocomplete";
 
 interface LocationSelectorProps {
   value: QueryLocation | null;
@@ -28,8 +30,7 @@ export function saveQueryLocation(location: QueryLocation) {
 
 export function LocationSelector({ value, onChange }: LocationSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [localidad, setLocalidad] = useState(value?.localidad ?? "");
-  const [provincia, setProvincia] = useState(value?.provincia ?? "");
+  const [geografia, setGeografia] = useState<GeografiaValor>({ localidad: value?.localidad ?? "", provincia: value?.provincia ?? "", pais: value?.pais ?? "Argentina", geoname_id: value?.geoname_id, codigo_pais: value?.codigo_pais, latitud: value?.latitud, longitud: value?.longitud });
   const [error, setError] = useState<string | null>(null);
 
   const label = value?.localidad
@@ -70,12 +71,11 @@ export function LocationSelector({ value, onChange }: LocationSelectorProps) {
   const submitManual = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     persist({
-      ...DEFAULT_LOCATION,
-      localidad: localidad.trim() || undefined,
-      provincia: provincia.trim() || undefined,
-      latitud: localidad.trim().toLowerCase() === "río gallegos" ? DEFAULT_LOCATION.latitud : undefined,
-      longitud:
-        localidad.trim().toLowerCase() === "río gallegos" ? DEFAULT_LOCATION.longitud : undefined,
+      ...geografia,
+      localidad: geografia.localidad.trim() || undefined,
+      provincia: geografia.provincia.trim() || undefined,
+      latitud: geografia.latitud ?? undefined,
+      longitud: geografia.longitud ?? undefined,
       origen: "MANUAL"
     });
   };
@@ -100,22 +100,7 @@ export function LocationSelector({ value, onChange }: LocationSelectorProps) {
           </button>
 
           <form className="manual-location-form" onSubmit={submitManual}>
-            <label>
-              Localidad
-              <input
-                value={localidad}
-                onChange={(event) => setLocalidad(event.target.value)}
-                placeholder="Río Gallegos"
-              />
-            </label>
-            <label>
-              Provincia
-              <input
-                value={provincia}
-                onChange={(event) => setProvincia(event.target.value)}
-                placeholder="Santa Cruz"
-              />
-            </label>
+            <LocalidadAutocomplete valor={geografia} alCambiar={setGeografia} />
             <button className="action-button" type="submit">
               <Search size={18} aria-hidden="true" />
               Guardar ubicación

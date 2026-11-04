@@ -4,9 +4,11 @@ import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { api } from "../api/client";
+import { obtenerTokenSesion } from "../api/sesion";
 import { categoryOptions } from "../data/categoriasProveedor";
 import { providerTemplates, ProviderTemplateKey } from "../templates/visualTemplates";
 import { Proveedor } from "../types/proveedores";
+import { LocalidadAutocomplete } from "../components/LocalidadAutocomplete";
 
 type FieldErrors = Partial<Record<keyof typeof emptyForm | "form", string>>;
 
@@ -15,6 +17,10 @@ type MediaRead = {
 };
 
 const emptyForm = {
+  geoname_id: null as number | null,
+  codigo_pais: null as string | null,
+  latitud: null as number | null,
+  longitud: null as number | null,
   nombre_comercial: "",
   slug: "",
   cuit: "",
@@ -69,11 +75,9 @@ export function ProviderFormPage() {
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [savedProviderSlug, setSavedProviderSlug] = useState<string | null>(null);
-  const [tokenAlta, setTokenAlta] = useState<string | null>(null);
+  const [bienvenidaEnviada, setBienvenidaEnviada] = useState(false);
+  const [errorCorreo, setErrorCorreo] = useState<string | null>(null);
   const [confirmationEmail, setConfirmationEmail] = useState("");
-  const [resending, setResending] = useState(false);
-  const [resendMessage, setResendMessage] = useState<string | null>(null);
-  const [resendError, setResendError] = useState<string | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState<"PORTADA" | "LOGO" | null>(null);
 
   useEffect(() => {
@@ -81,6 +85,10 @@ export function ProviderFormPage() {
     api.get<Proveedor>(`/proveedores/${slug}`).then((response) => {
       const proveedor = response.data;
       setForm({
+        geoname_id: proveedor.geoname_id ?? null,
+        codigo_pais: proveedor.codigo_pais ?? null,
+        latitud: proveedor.latitud ?? null,
+        longitud: proveedor.longitud ?? null,
         nombre_comercial: proveedor.nombre_comercial,
         slug: proveedor.slug,
         cuit: proveedor.cuit ?? "",
@@ -158,7 +166,7 @@ export function ProviderFormPage() {
     if (form.categorias.length === 0) {
       nextErrors.categorias = "Selecciona al menos una categoria.";
     }
-    if (!form.provincia.trim()) {
+    if (!form.provincia.trim() && !form.geoname_id) {
       nextErrors.provincia = "Carga la provincia.";
     }
     if (!form.localidad.trim()) {
@@ -242,8 +250,8 @@ export function ProviderFormPage() {
       google_maps_url: form.google_maps_url.trim() || null,
       google_place_id: form.google_place_id.trim() || null,
       ubicacion_referencia: form.ubicacion_referencia.trim() || null,
-      latitud: null,
-      longitud: null,
+      latitud: form.latitud,
+      longitud: form.longitud,
       email: form.email.trim(),
       web: form.web.trim() || null,
       whatsapp: form.whatsapp.trim() || null,
@@ -265,8 +273,11 @@ export function ProviderFormPage() {
           navigate(`/p/${response.data.slug}`);
           return;
         }
+        const creada = response.data as Proveedor & { bienvenida_enviada?: boolean; email_validado?: boolean; error_correo?: string | null };
+        if (creada.email_validado && obtenerTokenSesion()) { navigate(`/p/${creada.slug}`); return; }
+        setBienvenidaEnviada(Boolean(creada.bienvenida_enviada));
+        setErrorCorreo(creada.error_correo ?? null);
         setSavedProviderSlug(response.data.slug);
-        setTokenAlta((response.data as { token_alta?: string }).token_alta ?? null);
         setConfirmationEmail(response.data.email ?? form.email.trim());
       })
       .catch(applyServerErrors)
@@ -293,67 +304,20 @@ export function ProviderFormPage() {
       .finally(() => setUploadingMedia(null));
   };
 
-  const resendConfirmationEmail = () => {
-    setResendError(null);
-    setResendMessage(null);
-
-    const email = confirmationEmail.trim();
-    if (!emailPattern.test(email)) {
-      setResendError("Carga un email valido para reenviar.");
-      return;
-    }
-    if (!savedProviderSlug) return;
-
-    setResending(true);
-    api
-      .post<Proveedor>(`/proveedores/${savedProviderSlug}/reenviar-confirmacion`, {
-        email,
-        token_alta: tokenAlta
-      })
-      .then((response) => {
-        setConfirmationEmail(response.data.email ?? email);
-        setResendMessage("Reenviamos el correo de confirmacion.");
-      })
-      .catch(() => setResendError("No se pudo reenviar el email. Intenta nuevamente."))
-      .finally(() => setResending(false));
-  };
-
   if (savedProviderSlug) {
     return (
       <main className={`providers-page template-live-page ${selectedTemplate.className}`}>
         <section className="confirmation-panel">
           <MailCheck size={36} aria-hidden="true" />
-          <p className="eyebrow">Validacion enviada</p>
-          <h1>Revisa tu email</h1>
-          <p>
-            Guardamos el proveedor y enviamos un correo de confirmacion al email indicado.
-            Desde ese correo podras validar el negocio y volver a la app.
+          <p className="eyebrow">Proveedor registrado</p>
+          <h1>{bienvenidaEnviada ? "Valida tu email una vez" : "Ingresa con tu cuenta de Google"}</h1>
+          <p>Guardamos tu proveedor para <strong>{confirmationEmail}</strong>.
+            {bienvenidaEnviada ? " Enviamos la bienvenida para validar tu email una sola vez. Luego usa tu cuenta de Google para ingresar." :
+              " No enviamos otro correo. Selecciona tu cuenta de Google para administrar tus sitios. Si todavia no validaste tu email, utiliza la bienvenida inicial."}
           </p>
-          <label className="confirmation-email-field">
-            Email utilizado
-            <input
-              aria-invalid={Boolean(resendError)}
-              className={resendError ? "invalid-field" : undefined}
-              value={confirmationEmail}
-              onChange={(event) => {
-                setConfirmationEmail(event.target.value);
-                setResendError(null);
-                setResendMessage(null);
-              }}
-            />
-            {resendError && <span className="field-error">{resendError}</span>}
-            {resendMessage && <span className="success-inline">{resendMessage}</span>}
-          </label>
           <div className="confirmation-actions">
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={resendConfirmationEmail}
-              disabled={resending}
-            >
-              <MailCheck size={18} aria-hidden="true" />
-              {resending ? "Reenviando..." : "Reenviar mail"}
-            </button>
+            {errorCorreo && <p className="form-error" role="alert">Tu proveedor se guardo, pero no pudimos enviar la bienvenida: {errorCorreo}</p>}
+            <button className="action-button" type="button" onClick={() => navigate(`/ingresar?destino=${encodeURIComponent(`/p/${savedProviderSlug}`)}`)}>Ingresar con Google</button>
             <button className="secondary-button" type="button" onClick={() => navigate("/")}>
               <ArrowLeft size={18} aria-hidden="true" />
               Volver al inicio
@@ -527,26 +491,12 @@ export function ProviderFormPage() {
           {errors.categorias && <span className="field-error">{errors.categorias}</span>}
         </section>
 
-        <label>
-          Provincia
-          <input
-            aria-invalid={Boolean(errors.provincia)}
-            className={inputClass("provincia")}
-            value={form.provincia}
-            onChange={(event) => update("provincia", event.target.value)}
-          />
-          {errors.provincia && <span className="field-error">{errors.provincia}</span>}
-        </label>
-        <label>
-          Localidad
-          <input
-            aria-invalid={Boolean(errors.localidad)}
-            className={inputClass("localidad")}
-            value={form.localidad}
-            onChange={(event) => update("localidad", event.target.value)}
-          />
-          {errors.localidad && <span className="field-error">{errors.localidad}</span>}
-        </label>
+        <LocalidadAutocomplete preservarPin valor={form} alCambiar={geo => {
+          setForm(actual => ({ ...actual, localidad: geo.localidad, provincia: geo.provincia, pais: geo.pais,
+            geoname_id: geo.geoname_id ?? null, codigo_pais: geo.codigo_pais ?? null,
+            latitud: geo.latitud ?? null, longitud: geo.longitud ?? null }));
+          clearError("localidad"); clearError("provincia");
+        }} />
         <label className="wide">
           Direccion
           <input

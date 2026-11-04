@@ -1,17 +1,19 @@
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import Select, delete, func, select
+from sqlalchemy import Select, and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import Plan
 from app.models.eventos import Evento
 from app.models.proveedores import CategoriaProveedor, Proveedor, ProveedorCategoriaLink
 from app.models.usuarios import User
+from app.models.geografia import GeoPais
 from app.schemas.proveedores import ProveedorCreate, ProveedorRead
 from app.services.distance import haversine_km
 from app.services.mapas import resolver_coordenadas_google_maps
 from app.services.email import send_provider_confirmation_email, send_provider_edit_access_email
+from app.services.geografia import resolver_geografia
 from app.services.slug import slugify
 
 
@@ -124,6 +126,8 @@ def proveedor_to_read(proveedor: Proveedor, distance: float | None = None) -> Pr
         categorias=[category.slug for category in categorias_detalle],
         categorias_detalle=categorias_detalle,
         pais=proveedor.pais,
+        geoname_id=proveedor.geoname_id,
+        codigo_pais=proveedor.codigo_pais,
         localidad=proveedor.localidad,
         provincia=proveedor.provincia,
         direccion=proveedor.direccion,
@@ -141,6 +145,8 @@ def proveedor_to_read(proveedor: Proveedor, distance: float | None = None) -> Pr
         logo_url=proveedor.logo_url,
         portada_url=proveedor.portada_url,
         portada_encuadre=proveedor.portada_encuadre,
+        textos_portada=proveedor.textos_portada,
+        colores_textos=proveedor.colores_textos or {},
         horarios=proveedor.horarios,
         template_key=proveedor.template_key,
         plan=proveedor.plan,
@@ -149,10 +155,11 @@ def proveedor_to_read(proveedor: Proveedor, distance: float | None = None) -> Pr
     )
 
 
-def create_proveedor(db: Session, data: ProveedorCreate) -> Proveedor:
+def create_proveedor(db: Session, data: ProveedorCreate, usuario: User | None = None) -> Proveedor:
     values = data.model_dump(mode="json", exclude={"categorias", "usuario_id"})
+    values = resolver_geografia(db, values)
     values["slug"] = validate_requested_slug(db, values["slug"])
-    user = get_or_create_user(
+    user = usuario if usuario and usuario.activo and usuario.email.lower() == str(values["email"]).lower() else get_or_create_user(
         db,
         values["email"],
         values["nombre_comercial"],
@@ -171,6 +178,10 @@ def create_proveedor(db: Session, data: ProveedorCreate) -> Proveedor:
 def update_proveedor(db: Session, slug: str, data: ProveedorCreate) -> Proveedor:
     proveedor = get_proveedor_by_slug(db, slug)
     values = data.model_dump(mode="json", exclude={"categorias", "usuario_id"})
+    for campo in ("geoname_id", "codigo_pais"):
+        if campo not in data.model_fields_set:
+            values.pop(campo, None)
+    values = resolver_geografia(db, values, proveedor)
     requested_slug = values.pop("slug", None)
     url_anterior = proveedor.google_maps_url
     for key, value in values.items():
@@ -226,6 +237,7 @@ def search_proveedores(
     categoria: str | None = None,
     localidad: str | None = None,
     provincia: str | None = None,
+    codigo_pais: str | None = None,
     nombre: str | None = None,
     plan: Plan | None = None,
     lat: float | None = None,
@@ -249,6 +261,10 @@ def search_proveedores(
         query = query.where(Proveedor.localidad.ilike(f"%{localidad.strip()}%"))
     if provincia:
         query = query.where(Proveedor.provincia.ilike(f"%{provincia.strip()}%"))
+    if codigo_pais:
+        pais_nombre = select(GeoPais.nombre).where(GeoPais.codigo_iso == codigo_pais).scalar_subquery()
+        query = query.where(or_(Proveedor.codigo_pais == codigo_pais,
+            and_(Proveedor.codigo_pais.is_(None), func.lower(Proveedor.pais) == func.lower(pais_nombre))))
     if nombre:
         query = query.where(
             func.lower(Proveedor.nombre_comercial).contains(nombre.strip().lower())

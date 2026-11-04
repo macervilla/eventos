@@ -33,5 +33,21 @@ async def upload_event_cover_endpoint(
     usuario: User = Depends(obtener_usuario_actual),
 ) -> MediaRead:
     evento = obtener_evento_del_propietario(db, slug, usuario)
-    media = await upload_event_cover(db, evento=evento, file=file)
+    media = await upload_event_cover(db, evento=evento, file=file, usuario_id=usuario.id)
     return media_to_read(media)
+
+
+@router.post("/eventos/{slug}/GALERIA", response_model=MediaRead)
+async def agregar_imagen_evento(slug: str, file: UploadFile = File(...),
+                               db: Session = Depends(get_db), usuario: User = Depends(obtener_usuario_actual)) -> MediaRead:
+    evento = obtener_evento_del_propietario(db, slug, usuario)
+    return media_to_read(await upload_event_cover(db, evento=evento, file=file,
+                         tipo=MediaTipo.GALERIA, usuario_id=usuario.id))
+
+
+@router.put("/eventos/{slug}/GALERIA/{imagen_id}", response_model=MediaRead)
+async def reemplazar_imagen_evento(slug: str, imagen_id: int, file: UploadFile = File(...),
+                                  db: Session = Depends(get_db), usuario: User = Depends(obtener_usuario_actual)) -> MediaRead:
+    evento = obtener_evento_del_propietario(db, slug, usuario)
+    return media_to_read(await upload_event_cover(db, evento=evento, file=file,
+                         tipo=MediaTipo.GALERIA, reemplazar_id=imagen_id, usuario_id=usuario.id))

@@ -34,8 +34,11 @@ export function MapaUbicacion({ latitud, longitud, alCambiar }: MapaUbicacionPro
   useEffect(() => {
     if (!contenedor.current || mapa.current) return;
     const nuevoMapa = L.map(contenedor.current).setView(CENTRO_ARGENTINA, 4);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap",
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      // OSM requiere Referer. Enviar solo el origen protege los tokens de la URL,
+      // incluso cuando el documento usa no-referrer para los demas recursos.
+      referrerPolicy: "origin",
       maxZoom: 19
     }).addTo(nuevoMapa);
     nuevoMapa.on("click", (evento: L.LeafletMouseEvent) =>

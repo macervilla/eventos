@@ -1,26 +1,58 @@
 const CLAVE_SESION = "eventos_sesion";
+export const EVENTO_SESION = "eventos:sesion";
+let memoria: string | null = null;
+const CLAVE_CUENTA = "eventos_cuenta_pestana";
+let activa: { base: string; token: string } | null = null;
 
 export function obtenerTokenSesion(): string | null {
   try {
     // localStorage.getItem: lee un valor guardado en el navegador (persiste entre pestañas)
-    return localStorage.getItem(CLAVE_SESION);
+    const base = localStorage.getItem(CLAVE_SESION);
+    if (!base) return null;
+    try {
+      const cuenta = activa ?? JSON.parse(sessionStorage.getItem(CLAVE_CUENTA) || "null");
+      if (cuenta?.base === base) return cuenta.token;
+    } catch { /* Si no hay almacenamiento de pestana, usar la sesion principal. */ }
+    return base;
   } catch {
-    return null;
+    return memoria;
   }
 }
 
 export function guardarTokenSesion(token: string) {
+  const anterior = obtenerTokenSesion();
+  memoria = token;
+  activa = null;
   try {
     localStorage.setItem(CLAVE_SESION, token);
+    sessionStorage.removeItem(CLAVE_CUENTA);
   } catch {
     // Sin almacenamiento disponible: la sesion dura solo mientras no se recargue.
   }
+  if (anterior !== token) window.dispatchEvent(new Event(EVENTO_SESION));
+}
+
+// Una cuenta duplicada puede administrar otro sitio en otra pestana sin cambiarla.
+export function seleccionarCuentaSesion(token: string) {
+  const anterior = obtenerTokenSesion();
+  let base: string | null = null;
+  try { base = localStorage.getItem(CLAVE_SESION); } catch { /* usar sesion en memoria */ }
+  if (!base) { guardarTokenSesion(token); return; }
+  activa = { base, token };
+  try { sessionStorage.setItem(CLAVE_CUENTA, JSON.stringify(activa)); } catch { /* activa queda en memoria */ }
+  if (anterior !== token) window.dispatchEvent(new Event(EVENTO_SESION));
 }
 
 export function cerrarSesion() {
+  const anterior = obtenerTokenSesion();
+  memoria = null;
+  activa = null;
+  window.google?.accounts?.id?.disableAutoSelect?.();
   try {
     localStorage.removeItem(CLAVE_SESION);
+    sessionStorage.removeItem(CLAVE_CUENTA);
   } catch {
     // nada que limpiar
   }
+  if (anterior) window.dispatchEvent(new Event(EVENTO_SESION));
 }

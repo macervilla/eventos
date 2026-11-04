@@ -14,8 +14,9 @@ import {
   Phone
 } from "lucide-react";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
+import { TextosPortadaEvento } from "../components/TextosPortada";
 import { api } from "../api/client";
 import { cerrarSesion, obtenerTokenSesion } from "../api/sesion";
 import {
@@ -49,6 +50,7 @@ export function ProviderPublicPage() {
   const [ventanaAbierta, setVentanaAbierta] = useState<"datos" | "ubicacion" | null>(null);
   const [subiendoPortada, setSubiendoPortada] = useState(false);
   const [avisoEdicion, setAvisoEdicion] = useState<string | null>(null);
+  const [controlesTextos, setControlesTextos] = useState<HTMLDivElement | null>(null);
   const selectorPortada = useRef<HTMLInputElement>(null);
 
   const cargarProveedor = useCallback(() => {
@@ -69,7 +71,7 @@ export function ProviderPublicPage() {
       .get<SesionActual>("/acceso/yo")
       .then((response) =>
         setEsAdministrador(
-          response.data.opciones.some((opcion) => opcion.tipo === "proveedor" && opcion.slug === slug)
+          response.data.opciones.some((opcion) => opcion.tipo === "administracion" || (opcion.tipo === "proveedor" && opcion.slug === slug))
         )
       )
       .catch(() => setEsAdministrador(false));
@@ -171,21 +173,30 @@ export function ProviderPublicPage() {
 
   return (
     <main className={`provider-public ${template.className}`}>
+      <div ref={setControlesTextos} />
       <section className="provider-cover">
         <CapasPortada imagen={cover} encuadre={ajuste.encuadreVisible} />
-        <nav className="public-nav overlay-nav">
-          <Link to="/" className="brand">
-            Eventos
-          </Link>
-          <Link to="/proveedores">Buscar proveedores</Link>
-        </nav>
-        <div className="provider-cover-copy">
-          <p className="eyebrow">
-            {proveedor.categorias_detalle.map((category) => category.nombre).join(" · ")}
-          </p>
-          <h1>{proveedor.nombre_comercial}</h1>
-          <p>{proveedor.descripcion ?? "Proveedor de servicios para eventos."}</p>
-        </div>
+        <TextosPortadaEvento
+          key={`${slug}-${esAdministrador}-${ajuste.editando}`}
+          configuracion={proveedor.textos_portada}
+          colores={proveedor.colores_textos}
+          etiquetas={{ fecha: "Categorias", titulo: "Nombre", lugar: "Descripcion" }}
+          textos={{
+            fecha: proveedor.categorias_detalle.map(category => category.nombre).join(" \u00b7 "),
+            titulo: proveedor.nombre_comercial,
+            lugar: proveedor.descripcion ?? "Proveedor de servicios para eventos."
+          }}
+          editable={esAdministrador && !ajuste.editando && ventanaAbierta === null}
+          editarColores
+          contenedorControles={controlesTextos}
+          alGuardar={async (textos_portada, colores_textos) => {
+            const { data } = await api.put<Proveedor>(`/proveedores/${slug}/textos-portada`, {
+              textos_portada, colores_textos
+            });
+            setProveedor(data);
+            setAvisoEdicion("Posiciones, visibilidad y colores guardados.");
+          }}
+        />
 
         {ajuste.editor}
         {esAdministrador && !ajuste.editando && (

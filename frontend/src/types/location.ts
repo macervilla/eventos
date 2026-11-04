@@ -1,6 +1,8 @@
 export type LocationOrigin = "GEOLOCATION" | "MANUAL" | "EVENTO";
 
 export interface QueryLocation {
+  geoname_id?: number | null;
+  codigo_pais?: string | null;
   localidad?: string;
   provincia?: string;
   pais: string;

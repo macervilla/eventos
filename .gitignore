@@ -1,4 +1,9 @@
 .env
+.env.vps
+/actualizacion-eventos.tar.gz
+/actualizacion-geografia.tar.gz
+/actualizacion-acceso.tar.gz
+/geonames/
 __pycache__/
 *.py[cod]
 .pytest_cache/

@@ -1,9 +1,11 @@
 import smtplib
+import ssl
 from email.message import EmailMessage
 from email.utils import formataddr
 from html import escape
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
+from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.seguridad import crear_token_confirmacion_evento, crear_token_enlace
@@ -16,14 +18,14 @@ def _build_url(path: str) -> str:
     return f"{base_url}{path}"
 
 
-def _build_login_url(email: str, destino: str | None = None) -> str:
-    path = f"/ingresar?enlace={crear_token_enlace(email)}"
+def _build_login_url(email: str, destino: str | None = None, usuario_id: int | None = None) -> str:
+    path = f"/ingresar?enlace={crear_token_enlace(email, usuario_id)}"
     if destino:
         path += f"&destino={quote(destino, safe='')}"
     return _build_url(path)
 
 
-def _send_email(to_email: str | None, subject: str, html: str, text: str) -> None:
+def _send_email(to_email: str | None, subject: str, html: str, text: str, *, attachment: bytes | None = None) -> None:
     if not to_email:
         return
 
@@ -37,32 +39,35 @@ def _send_email(to_email: str | None, subject: str, html: str, text: str) -> Non
         message["Subject"] = subject
         message.set_content(text)
         message.add_alternative(html, subtype="html")
+        if attachment:
+            message.add_attachment(attachment, maintype="image", subtype="png", filename="credencial.png")
 
         security = (settings.smtp_security or "").strip().lower()
         use_ssl = security == "ssl" or settings.smtp_port == 465
         use_tls = security in {"tls", "starttls"} or (settings.smtp_use_tls and not use_ssl)
 
         smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
-        with smtp_class(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
-            if use_tls:
-                smtp.starttls()
-            smtp.login(settings.smtp_username, settings.smtp_password)
-            smtp.send_message(message)
+        contexto_ssl = ssl.create_default_context()
+        opciones = {"context": contexto_ssl} if use_ssl else {}
+        try:
+            with smtp_class(settings.smtp_host, settings.smtp_port, timeout=20, **opciones) as smtp:
+                if use_tls:
+                    smtp.starttls(context=contexto_ssl)
+                smtp.login(settings.smtp_username, settings.smtp_password)
+                rechazados = smtp.send_message(message)
+                if rechazados:
+                    raise HTTPException(503, "El servidor de correo rechazo el destinatario")
+        except (smtplib.SMTPException, OSError) as exc:
+            raise HTTPException(503, "No se pudo enviar el correo mediante SMTP. Intenta nuevamente") from exc
         return
 
-    print(
-        "[mail:dev] SMTP sin credenciales completas\n"
-        f"From: {formataddr((from_name, from_email))}\n"
-        f"Para: {to_email}\n"
-        f"Asunto: {subject}\n"
-        f"{text}"
-    )
+    raise HTTPException(503, "El servicio de correo no esta configurado; no se envio el mensaje")
 
 
 def send_provider_confirmation_email(proveedor: Proveedor) -> None:
     if not proveedor.email:
         return
-    edit_url = _build_login_url(proveedor.email, f"/p/{proveedor.slug}")
+    edit_url = _build_login_url(proveedor.email, f"/p/{proveedor.slug}", proveedor.usuario_id)
     subject = f"Confirma tu proveedor {proveedor.nombre_comercial}"
     text = (
         f"Guardamos tu proveedor {proveedor.nombre_comercial}.\n\n"
@@ -80,7 +85,7 @@ def send_provider_confirmation_email(proveedor: Proveedor) -> None:
 def send_provider_edit_access_email(proveedor: Proveedor) -> None:
     if not proveedor.email:
         return
-    edit_url = _build_login_url(proveedor.email, f"/p/{proveedor.slug}")
+    edit_url = _build_login_url(proveedor.email, f"/p/{proveedor.slug}", proveedor.usuario_id)
     subject = f"Acceso para editar {proveedor.nombre_comercial}"
     text = (
         f"Solicitaste editar {proveedor.nombre_comercial}.\n\n"
@@ -95,8 +100,10 @@ def send_provider_edit_access_email(proveedor: Proveedor) -> None:
     _send_email(proveedor.email, subject, html, text)
 
 
-def send_access_link_email(email: str, token: str) -> None:
+def send_access_link_email(email: str, token: str, destino: str | None = None) -> None:
     login_url = _build_url(f"/ingresar?enlace={token}")
+    if destino:
+        login_url += f"&destino={quote(destino, safe='')}"
     subject = "Tu enlace para ingresar a Eventos"
     text = (
         "Usa este enlace para ingresar (vence en 30 minutos):\n\n"
@@ -109,6 +116,17 @@ def send_access_link_email(email: str, token: str) -> None:
     <p>Si no lo solicitaste, podes ignorar este correo.</p>
     """
     _send_email(email, subject, html, text)
+
+
+def send_welcome_email(email: str, token: str, destino: str | None = None) -> None:
+    url = _build_url(f"/ingresar?enlace={token}")
+    if destino:
+        url += f"&destino={quote(destino, safe='')}"
+    text = ("Bienvenido a Eventos. Valida tu email una sola vez desde este enlace (vence en 48 horas):\n"
+            + url + "\nDespues ingresa seleccionando tu cuenta de Google desde cualquier pagina, sin pedir otro correo.")
+    html = (f'<p>Bienvenido a Eventos.</p><p><a href="{escape(url, quote=True)}">Validar mi email</a></p>'
+            '<p>Este enlace vence en 48 horas. Luego podes ingresar con tu cuenta de Google, sin solicitar nuevos correos.</p>')
+    _send_email(email, "Bienvenido a Eventos: valida tu email", html, text)
 
 
 def send_event_confirmation_email(evento: Evento, email: str) -> None:

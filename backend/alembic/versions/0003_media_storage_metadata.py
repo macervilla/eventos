@@ -18,9 +18,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE media_tipo ADD VALUE IF NOT EXISTS 'PORTADA'")
-    op.execute("ALTER TYPE media_tipo ADD VALUE IF NOT EXISTS 'LOGO'")
-    op.execute("ALTER TYPE media_tipo ADD VALUE IF NOT EXISTS 'GALERIA'")
+    # PostgreSQL exige confirmar los nuevos valores antes de poder utilizarlos.
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE media_tipo ADD VALUE IF NOT EXISTS 'PORTADA'")
+        op.execute("ALTER TYPE media_tipo ADD VALUE IF NOT EXISTS 'LOGO'")
+        op.execute("ALTER TYPE media_tipo ADD VALUE IF NOT EXISTS 'GALERIA'")
     op.add_column("media", sa.Column("uuid", sa.Uuid(), nullable=True))
     op.add_column("media", sa.Column("uploaded_by", sa.Integer(), nullable=True))
     op.add_column("media", sa.Column("size_bytes", sa.BigInteger(), nullable=True))

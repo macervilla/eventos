@@ -7,14 +7,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 from app.models.enums import EventoEstado, EventoPrivacidad, Plan, RolEvento
 from app.models.mixins import SoftDeleteMixin, TimestampMixin
+from app.models.geografia import ReferenciaGeografica
 
 
-class Evento(SoftDeleteMixin, TimestampMixin, Base):
+class Evento(ReferenciaGeografica, SoftDeleteMixin, TimestampMixin, Base):
     __tablename__ = "eventos"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     uuid: Mapped[uuid_lib.UUID] = mapped_column(default=uuid_lib.uuid4, unique=True, index=True)
     nombre: Mapped[str] = mapped_column(String(180), nullable=False)
+    titulo_visual: Mapped[str | None] = mapped_column(String(180))
+    colores: Mapped[dict | None] = mapped_column(JSON)
     slug: Mapped[str] = mapped_column(String(220), unique=True, index=True, nullable=False)
     descripcion: Mapped[str | None] = mapped_column(Text)
     tipo_evento: Mapped[str | None] = mapped_column(String(80), index=True)
@@ -56,6 +59,7 @@ class Evento(SoftDeleteMixin, TimestampMixin, Base):
         back_populates="evento",
         cascade="all, delete-orphan",
     )
+    imagenes = relationship("Media", primaryjoin="Evento.id == Media.evento_id", viewonly=True)
 
 
 class EventoModulo(TimestampMixin, Base):
@@ -79,6 +83,8 @@ class EventoUsuario(TimestampMixin, Base):
     evento_id: Mapped[int] = mapped_column(ForeignKey("eventos.id", ondelete="CASCADE"))
     usuario_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     rol: Mapped[RolEvento] = mapped_column(Enum(RolEvento, name="rol_evento"), nullable=False)
+    permisos: Mapped[list | None] = mapped_column(JSON)
+    solo_responsable: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
     evento = relationship("Evento")
     usuario = relationship("User")

@@ -10,6 +10,7 @@ import {
 } from "../components/LocationSelector";
 import { DEFAULT_LOCATION, QueryLocation } from "../types/location";
 import { Plan, Proveedor } from "../types/proveedores";
+import { GeografiaValor, LocalidadAutocomplete } from "../components/LocalidadAutocomplete";
 
 const categorias: Array<{ value: string; label: string }> = [
   { value: "dj", label: "DJ" },
@@ -24,6 +25,7 @@ export function ProveedoresPage() {
   const [queryLocation, setQueryLocation] = useState<QueryLocation | null>(() => readSavedLocation());
   const [categoria, setCategoria] = useState("");
   const [localidad, setLocalidad] = useState("");
+  const [filtroGeo, setFiltroGeo] = useState<GeografiaValor>({ localidad: "", provincia: "", pais: "" });
   const [nombre, setNombre] = useState("");
   const [radioKm, setRadioKm] = useState("30");
   const [plan, setPlan] = useState<Plan | "">("");
@@ -42,17 +44,22 @@ export function ProveedoresPage() {
     const searchParams: Record<string, string | number> = {};
     if (categoria) searchParams.categoria = categoria;
     if (localidad.trim()) searchParams.localidad = localidad.trim();
+    if (filtroGeo.geoname_id) {
+      searchParams.provincia = filtroGeo.provincia;
+      searchParams.codigo_pais = filtroGeo.codigo_pais || "";
+    }
     if (nombre.trim()) searchParams.nombre = nombre.trim();
     if (plan) searchParams.plan = plan;
-    if (queryLocation?.latitud !== undefined && queryLocation.longitud !== undefined) {
-      searchParams.lat = queryLocation.latitud;
-      searchParams.lng = queryLocation.longitud;
+    const centro = filtroGeo.geoname_id ? filtroGeo : queryLocation;
+    if (centro?.latitud != null && centro.longitud != null) {
+      searchParams.lat = centro.latitud;
+      searchParams.lng = centro.longitud;
       if (radioKm) searchParams.radio_km = radioKm;
     } else if (queryLocation?.localidad && !localidad.trim()) {
       searchParams.localidad = queryLocation.localidad;
     }
     return searchParams;
-  }, [categoria, localidad, nombre, plan, queryLocation, radioKm]);
+  }, [categoria, localidad, filtroGeo, nombre, plan, queryLocation, radioKm]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,14 +115,7 @@ export function ProveedoresPage() {
             placeholder="DJ Example"
           />
         </label>
-        <label>
-          Localidad
-          <input
-            value={localidad}
-            onChange={(event) => setLocalidad(event.target.value)}
-            placeholder={queryLocation?.localidad ?? "Río Gallegos"}
-          />
-        </label>
+        <LocalidadAutocomplete compacto valor={filtroGeo} alCambiar={geo => { setFiltroGeo(geo); setLocalidad(geo.localidad); }} />
         <label>
           Distancia
           <select value={radioKm} onChange={(event) => setRadioKm(event.target.value)}>

@@ -7,8 +7,14 @@ import { categoryOptions } from "../data/categoriasProveedor";
 import { providerTemplates } from "../templates/visualTemplates";
 import { Proveedor } from "../types/proveedores";
 import { Ventana } from "./Ventana";
+import { GeografiaValor, LocalidadAutocomplete } from "./LocalidadAutocomplete";
 
 type CamposEditables = {
+  pais: string;
+  geoname_id: number | null;
+  codigo_pais: string | null;
+  latitud: number | null;
+  longitud: number | null;
   nombre_comercial: string;
   descripcion: string;
   horarios: string;
@@ -40,6 +46,11 @@ const vacioANull = (valor: string | null | undefined) => {
 
 function camposDesde(proveedor: Proveedor): CamposEditables {
   return {
+    pais: proveedor.pais,
+    geoname_id: proveedor.geoname_id ?? null,
+    codigo_pais: proveedor.codigo_pais ?? null,
+    latitud: proveedor.latitud ?? null,
+    longitud: proveedor.longitud ?? null,
     nombre_comercial: proveedor.nombre_comercial,
     descripcion: proveedor.descripcion ?? "",
     horarios: proveedor.horarios ?? "",
@@ -67,15 +78,17 @@ function guardarProveedor(proveedor: Proveedor, campos: CamposEditables) {
     cuit: proveedor.cuit ?? null,
     descripcion: vacioANull(campos.descripcion),
     categorias: campos.categorias,
-    pais: proveedor.pais,
+    pais: campos.pais,
+    geoname_id: campos.geoname_id,
+    codigo_pais: campos.codigo_pais,
     provincia: campos.provincia.trim(),
     localidad: campos.localidad.trim(),
     direccion: campos.direccion.trim(),
     google_maps_url: vacioANull(campos.google_maps_url),
     google_place_id: proveedor.google_place_id ?? null,
     ubicacion_referencia: vacioANull(campos.ubicacion_referencia),
-    latitud: proveedor.latitud ?? null,
-    longitud: proveedor.longitud ?? null,
+    latitud: campos.latitud,
+    longitud: campos.longitud,
     whatsapp: vacioANull(campos.whatsapp),
     telefono: vacioANull(campos.telefono),
     email: campos.email.trim(),
@@ -152,7 +165,13 @@ function useFormularioEdicion({ proveedor, alGuardar }: VentanaEdicionProps) {
       .finally(() => setGuardando(false));
   };
 
-  return { campos, cambiar, enviar, guardando, error };
+  const cambiarGeografia = (geo: GeografiaValor) => {
+    setCampos(actual => ({ ...actual, localidad: geo.localidad, provincia: geo.provincia, pais: geo.pais,
+      geoname_id: geo.geoname_id ?? null, codigo_pais: geo.codigo_pais ?? null,
+      latitud: geo.latitud ?? null, longitud: geo.longitud ?? null }));
+    setError(null);
+  };
+  return { campos, cambiar, cambiarGeografia, enviar, guardando, error };
 }
 
 function PieFormulario({ guardando, error, alCerrar }: { guardando: boolean; error: string | null; alCerrar: () => void }) {
@@ -273,10 +292,10 @@ export function VentanaDatos(props: VentanaEdicionProps) {
 }
 
 export function VentanaUbicacion(props: VentanaEdicionProps) {
-  const { campos, cambiar, enviar, guardando, error } = useFormularioEdicion(props);
+  const { campos, cambiar, cambiarGeografia, enviar, guardando, error } = useFormularioEdicion(props);
 
   const validar = () => {
-    if (!campos.provincia.trim() || !campos.localidad.trim() || !campos.direccion.trim()) {
+    if ((!campos.provincia.trim() && !campos.geoname_id) || !campos.localidad.trim() || !campos.direccion.trim()) {
       return "Provincia, localidad y direccion son obligatorias.";
     }
     const enlace = campos.google_maps_url.trim();
@@ -291,27 +310,20 @@ export function VentanaUbicacion(props: VentanaEdicionProps) {
     return null;
   };
 
-  const direccionCompleta = [campos.direccion, campos.localidad, campos.provincia, props.proveedor.pais]
+  const direccionCompleta = [campos.direccion, campos.localidad, campos.provincia, campos.pais]
     .filter(Boolean)
     .join(", ");
   const vistaPrevia = urlMapaEmbebido({
     direccion: campos.direccion,
     localidad: campos.localidad,
     provincia: campos.provincia,
-    pais: props.proveedor.pais
+    pais: campos.pais
   });
 
   return (
     <Ventana titulo="Ubicacion" alCerrar={props.alCerrar}>
       <form className="ventana-formulario" onSubmit={(e) => enviar(e, validar)} noValidate>
-        <label>
-          Provincia
-          <input value={campos.provincia} onChange={(e) => cambiar("provincia", e.target.value)} />
-        </label>
-        <label>
-          Localidad
-          <input value={campos.localidad} onChange={(e) => cambiar("localidad", e.target.value)} />
-        </label>
+        <LocalidadAutocomplete preservarPin valor={campos} alCambiar={cambiarGeografia} />
         <label className="wide">
           Direccion
           <input value={campos.direccion} onChange={(e) => cambiar("direccion", e.target.value)} />

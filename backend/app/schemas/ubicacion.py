@@ -1,9 +1,10 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import LocationPreferenceOrigen
+from app.schemas.geografia import ReferenciaGeograficaSchema
 
 
-class UserLocationPreferenceUpsert(BaseModel):
+class UserLocationPreferenceUpsert(ReferenciaGeograficaSchema):
     localidad: str | None = None
     provincia: str | None = None
     pais: str = "Argentina"

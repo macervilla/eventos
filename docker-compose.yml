@@ -28,9 +28,14 @@ services:
       - C:/xampp/htdocs/idiomas/.env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://eventos:eventos@db:5432/eventos}
+      # OAuth pertenece a Eventos. No heredar el cliente de los env_file externos.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLOCK_SKEW_SECONDS: ${GOOGLE_CLOCK_SKEW_SECONDS:-5}
+      FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:5179}
     volumes:
       - ./backend:/app
       - media_data:/app/media
+      - ./frontend/dist:/app/frontend-dist:ro
     ports:
       - "8009:8000"
     depends_on:

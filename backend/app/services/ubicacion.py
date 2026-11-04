@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models.usuarios import UserLocationPreference
 from app.schemas.ubicacion import UserLocationPreferenceUpsert
+from app.services.geografia import resolver_geografia
 
 
 def get_preference(db: Session, user_id: int) -> UserLocationPreference | None:
@@ -19,6 +20,10 @@ def upsert_preference(
 ) -> UserLocationPreference:
     preference = get_preference(db, user_id)
     values = data.model_dump()
+    for campo in ("geoname_id", "codigo_pais"):
+        if campo not in data.model_fields_set:
+            values.pop(campo, None)
+    values = resolver_geografia(db, values, preference)
 
     if preference is None:
         preference = UserLocationPreference(user_id=user_id, **values)

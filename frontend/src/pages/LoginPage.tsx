@@ -1,12 +1,15 @@
-import { Building2, CalendarDays, Mail, UserCheck } from "lucide-react";
+import axios from "axios";
+import { Building2, CalendarDays, Mail, ShieldCheck, UserCheck } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
-import { guardarTokenSesion } from "../api/sesion";
+import { guardarTokenSesion, seleccionarCuentaSesion, obtenerTokenSesion } from "../api/sesion";
+import { GoogleSignIn } from "../components/GoogleSignIn";
 
 type AccessOption = {
-  tipo: "proveedor" | "evento";
+  token?: string | null;
+  tipo: "proveedor" | "evento" | "administracion";
   id: number;
   nombre: string;
   slug: string;
@@ -14,49 +17,23 @@ type AccessOption = {
 };
 
 type AccessResponse = {
+  google_vinculado?: boolean;
+  email_validado?: boolean;
   email: string;
   opciones: AccessOption[];
   token: string | null;
 };
 
-type GoogleConfigResponse = {
-  client_id: string | null;
-};
-
-type GoogleTokenResponse = {
-  access_token?: string;
-};
-
-type GoogleTokenClient = {
-  requestAccessToken: () => void;
-};
-
-declare global {
-  interface Window {
-    google?: {
-      accounts?: {
-        oauth2?: {
-          initTokenClient: (options: {
-            client_id: string;
-            scope: string;
-            callback: (response: GoogleTokenResponse) => void;
-          }) => GoogleTokenClient;
-        };
-      };
-    };
-  }
-}
-
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Solo se aceptan rutas internas como destino, para no redirigir a otros sitios.
 function destinoSeguro(destino: string | null) {
-  return destino && destino.startsWith("/") && !destino.startsWith("//") ? destino : null;
+  return destino && /^\/(?![\\/])/.test(destino) && !/[\\\r\n]/.test(destino) ? destino : null;
 }
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const enlaceProcesado = useRef(false);
   const [email, setEmail] = useState("");
   const [aviso, setAviso] = useState<string | null>(null);
@@ -66,16 +43,23 @@ export function LoginPage() {
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const resolveAccess = (response: AccessResponse, destino: string | null = null) => {
-    if (response.opciones.length === 0 || !response.token) {
+    if (!response.token) {
       setError("No encontramos eventos ni proveedores activos para ese email.");
       return;
     }
     guardarTokenSesion(response.token);
     if (destino) {
+      const opcion = response.opciones.find(o => destino === o.path || destino.startsWith(o.path + "/"));
+      if (opcion?.token) seleccionarCuentaSesion(opcion.token);
       navigate(destino, { replace: true });
       return;
     }
+    if (response.opciones.length === 0) {
+      navigate("/", { replace: true });
+      return;
+    }
     if (response.opciones.length === 1) {
+      if (response.opciones[0].token) seleccionarCuentaSesion(response.opciones[0].token);
       navigate(response.opciones[0].path);
       return;
     }
@@ -85,13 +69,26 @@ export function LoginPage() {
   useEffect(() => {
     const tokenEnlace = searchParams.get("enlace");
     // useRef evita canjear el enlace dos veces (React StrictMode ejecuta efectos doble en dev)
-    if (!tokenEnlace || enlaceProcesado.current) return;
+    if (!tokenEnlace) {
+      if (enlaceProcesado.current) return;
+      if (obtenerTokenSesion()) api.get<AccessResponse>("/acceso/yo").then(r => { setEmail(r.data.email); setOptions(r.data.opciones); }).catch(() => undefined);
+      return;
+    }
+    if (enlaceProcesado.current) return;
     enlaceProcesado.current = true;
+    const limpia = new URLSearchParams(searchParams); limpia.delete("enlace");
+    setSearchParams(limpia, { replace: true });
     setLoading(true);
     api
       .post<AccessResponse>("/acceso/enlace", { token: tokenEnlace })
       .then((response) => {
         setEmail(response.data.email);
+        if (response.data.token && response.data.google_vinculado === false) {
+          guardarTokenSesion(response.data.token);
+          setOptions(response.data.opciones);
+          setAviso("Email validado. Selecciona tu cuenta de Google para vincularla una vez y usarla en tus proximos ingresos.");
+          return;
+        }
         resolveAccess(response.data, destinoSeguro(searchParams.get("destino")));
       })
       .catch(() => setError("El enlace vencio o no es valido. Pedi uno nuevo."))
@@ -113,7 +110,7 @@ export function LoginPage() {
 
     setLoading(true);
     api
-      .post("/acceso/solicitar-enlace", { email: selectedEmail })
+      .post("/acceso/solicitar-enlace", { email: selectedEmail, destino: destinoSeguro(searchParams.get("destino")) })
       .then(() =>
         setAviso(`Si ${selectedEmail} esta registrado, te enviamos un enlace para ingresar.`)
       )
@@ -121,55 +118,21 @@ export function LoginPage() {
       .finally(() => setLoading(false));
   };
 
-  const startGoogleSignIn = () => {
+  const validarGoogle = (credential: string) => {
     setError(null);
     setAviso(null);
     setOptions([]);
-
-    if (!window.google?.accounts?.oauth2) {
-      setError("El ingreso con Google no esta configurado todavia.");
-      return;
-    }
-
     setGoogleLoading(true);
-    api
-      .get<GoogleConfigResponse>("/acceso/google-config")
-      .then((configResponse) => {
-        const googleClientId = configResponse.data.client_id;
-        if (!googleClientId) {
-          setGoogleLoading(false);
-          setError("Falta configurar GOOGLE_CLIENT_ID en el .env de idiomas.");
-          return;
-        }
-
-        const tokenClient = window.google!.accounts!.oauth2!.initTokenClient({
-          client_id: googleClientId,
-          scope: "email profile",
-          callback: (googleResponse) => {
-            if (!googleResponse.access_token) {
-              setGoogleLoading(false);
-              setError("No se pudo obtener la cuenta de Google seleccionada.");
-              return;
-            }
-
-            api
-              .post<AccessResponse>("/acceso/google", {
-                access_token: googleResponse.access_token
-              })
-              .then((response) => {
-                setEmail(response.data.email);
-                resolveAccess(response.data);
-              })
-              .catch(() => setError("No se pudo validar la cuenta de Google seleccionada."))
-              .finally(() => setGoogleLoading(false));
-          }
-        });
-        tokenClient.requestAccessToken();
+    api.post<AccessResponse>("/acceso/google", { credential })
+      .then(response => {
+        setEmail(response.data.email);
+        resolveAccess(response.data, destinoSeguro(searchParams.get("destino")));
       })
-      .catch(() => {
-        setGoogleLoading(false);
-        setError("No se pudo leer la configuracion de Google.");
-      });
+      .catch(err => {
+        const detalle = axios.isAxiosError(err) ? err.response?.data?.detail : null;
+        setError(typeof detalle === "string" ? detalle : "No se pudo validar la cuenta de Google. Intenta nuevamente.");
+      })
+      .finally(() => setGoogleLoading(false));
   };
 
   return (
@@ -177,26 +140,22 @@ export function LoginPage() {
       <section className="login-panel">
         <div>
           <p className="eyebrow">Ingresar</p>
-          <h1>Elegir cuenta</h1>
+          <h1>Ingresar a mis sitios</h1>
           <p>
-            Ingresa con Google para seleccionar una cuenta del dispositivo, o te enviamos un
-            enlace de acceso a tu email. Despues te llevamos al apartado que corresponda.
+            Selecciona tu cuenta de Google para acceder a tus eventos y proveedores.
+            La validacion inicial del email se realiza una sola vez; no necesitas pedir otro correo para ingresar.
           </p>
         </div>
 
-        <button
-          className="google-login-button"
-          type="button"
-          onClick={startGoogleSignIn}
-          disabled={googleLoading}
-        >
-          <span aria-hidden="true">G</span>
-          {googleLoading ? "Abriendo Google..." : "Ingresar con Google"}
-        </button>
+        <GoogleSignIn onCredential={validarGoogle} />
+        {googleLoading && <p role="status">Validando cuenta de Google...</p>}
+        {aviso && <p className="success-inline" role="status">{aviso}</p>}
+        {error && <p className="form-error" role="alert">{error}</p>}
 
+        <details className="acceso-recuperacion"><summary>Validacion inicial o recuperacion de acceso</summary>
         <form className="login-form" onSubmit={validateAccess}>
           <label>
-            Email manual
+            Email de la cuenta
             <input
               autoComplete="email"
               inputMode="email"
@@ -207,8 +166,6 @@ export function LoginPage() {
               onChange={(event) => setEmail(event.target.value)}
             />
           </label>
-          {error && <p className="form-error">{error}</p>}
-          {aviso && <p className="success-inline">{aviso}</p>}
           <div className="form-actions">
             <button className="secondary-button" type="button" onClick={() => setEmail("")}>
               <Mail size={18} aria-hidden="true" />
@@ -216,12 +173,13 @@ export function LoginPage() {
             </button>
             <button className="action-button" type="submit" disabled={loading}>
               <UserCheck size={18} aria-hidden="true" />
-              {loading ? "Enviando..." : "Enviarme enlace"}
+              {loading ? "Enviando..." : "Recuperar acceso"}
             </button>
           </div>
         </form>
+        </details>
 
-        {options.length > 1 && (
+        {options.length > 0 && (
           <section className="access-options" aria-label="Opciones de ingreso">
             <h2>Elegir apartado</h2>
             <div>
@@ -229,16 +187,16 @@ export function LoginPage() {
                 <button
                   key={`${option.tipo}-${option.id}`}
                   type="button"
-                  onClick={() => navigate(option.path)}
+                  onClick={() => { if (option.token) seleccionarCuentaSesion(option.token); navigate(option.path); }}
                 >
-                  {option.tipo === "proveedor" ? (
+                  {option.tipo === "administracion" ? <ShieldCheck size={20} aria-hidden="true" /> : option.tipo === "proveedor" ? (
                     <Building2 size={20} aria-hidden="true" />
                   ) : (
                     <CalendarDays size={20} aria-hidden="true" />
                   )}
                   <span>
                     <strong>{option.nombre}</strong>
-                    <small>{option.tipo === "proveedor" ? "Proveedor" : "Evento"}</small>
+                    <small>{option.tipo === "administracion" ? "Superadministrador" : option.tipo === "proveedor" ? "Proveedor" : "Evento"}</small>
                   </span>
                 </button>
               ))}

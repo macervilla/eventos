@@ -15,7 +15,7 @@ import {
 } from "../components/SelectorLugar";
 import { eventTemplates, EventTemplateKey } from "../templates/visualTemplates";
 
-type EventoCreado = { slug: string; email_confirmacion: string };
+type EventoCreado = { slug: string; email_confirmacion: string | null; confirmado: boolean; bienvenida_enviada: boolean; error_correo?: string | null };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -45,8 +45,8 @@ export function EventFormPage() {
   const [email, setEmail] = useState("");
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState(false);
-  const [reenviando, setReenviando] = useState(false);
-  const [aviso, setAviso] = useState<string | null>(null);
+  const [bienvenidaEnviada, setBienvenidaEnviada] = useState(false);
+  const [errorCorreo, setErrorCorreo] = useState<string | null>(null);
   const [emailConfirmacion, setEmailConfirmacion] = useState<string | null>(null);
 
   const template = eventTemplates[templateKey];
@@ -80,7 +80,6 @@ export function EventFormPage() {
 
   const guardar = (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault();
-    setAviso(null);
     if (!validar()) return;
 
     const payload = {
@@ -97,8 +96,11 @@ export function EventFormPage() {
     api
       .post<EventoCreado>("/eventos", payload)
       .then(({ data }) => {
+        if (data.confirmado) { navigate(`/e/${data.slug}`); return; }
         setSlug(data.slug);
-        setEmailConfirmacion(data.email_confirmacion);
+        setEmailConfirmacion(data.email_confirmacion || email.trim());
+        setBienvenidaEnviada(data.bienvenida_enviada);
+        setErrorCorreo(data.error_correo ?? null);
       })
       .catch((error) => {
         if (error?.response?.status === 409) {
@@ -110,35 +112,21 @@ export function EventFormPage() {
       .finally(() => setGuardando(false));
   };
 
-  const reenviar = () => {
-    setReenviando(true);
-    setAviso(null);
-    api
-      .post(`/eventos/${slug}/reenviar-confirmacion`)
-      .then(() => setAviso("Reenviamos el mail de confirmacion."))
-      .catch(() => setAviso("No se pudo reenviar. Intenta en un momento."))
-      .finally(() => setReenviando(false));
-  };
-
   if (emailConfirmacion) {
     return (
       <main className={`providers-page template-live-page ${template.className}`}>
         <section className="confirmation-panel">
           <MailCheck size={36} aria-hidden="true" />
-          <p className="eyebrow">Confirmacion enviada</p>
-          <h1>Revisa tu email</h1>
+          <p className="eyebrow">Evento registrado</p>
+          <h1>{bienvenidaEnviada ? "Valida tu email una vez" : "Ingresa con tu cuenta de Google"}</h1>
           <p>
-            Creamos el evento <strong>{nombre}</strong>. Enviamos un
-            correo a <strong>{emailConfirmacion}</strong>. El evento no se publica hasta que abras el
-            enlace de ese correo: al abrirlo se confirma y entras a su pagina como administrador. El
-            enlace vence en 48 horas.
+            Creamos el evento <strong>{nombre}</strong> para <strong>{emailConfirmacion}</strong>.
+            {bienvenidaEnviada ? " Enviamos la bienvenida para validar tu email. Luego vincula tu cuenta de Google y usala en tus proximos ingresos, sin nuevos correos." :
+              " No enviamos otro correo. Ingresa con Google para administrarlo y publicarlo. Si es tu primera vez, utiliza la validacion inicial que recibiste."}
           </p>
-          {aviso && <p className="success-inline">{aviso}</p>}
           <div className="confirmation-actions">
-            <button className="secondary-button" type="button" onClick={reenviar} disabled={reenviando}>
-              <MailCheck size={18} aria-hidden="true" />
-              {reenviando ? "Reenviando..." : "Reenviar mail"}
-            </button>
+            {errorCorreo && <p className="form-error" role="alert">Tu evento se guardo, pero no pudimos enviar la bienvenida: {errorCorreo}</p>}
+            <button className="action-button" type="button" onClick={() => navigate(`/ingresar?destino=${encodeURIComponent(`/e/${slug}`)}`)}>Ingresar con Google</button>
             <button className="secondary-button" type="button" onClick={() => navigate("/")}>
               <ArrowLeft size={18} aria-hidden="true" />
               Volver al inicio

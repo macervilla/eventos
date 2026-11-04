@@ -5,8 +5,11 @@ import { api } from "../api/client";
 import { Proveedor } from "../types/proveedores";
 import { urlMapaEmbebido } from "./EdicionProveedor";
 import { MapaUbicacion } from "./MapaUbicacion";
+import { LocalidadAutocomplete } from "./LocalidadAutocomplete";
 
 export type DatosLugar = {
+  geoname_id?: number | null;
+  codigo_pais?: string | null;
   lugar_tipo: "salon" | "domicilio";
   salon_slug: string;
   direccion: string;
@@ -32,7 +35,7 @@ export const LUGAR_VACIO: DatosLugar = {
 
 export function validarLugar(lugar: DatosLugar): string | null {
   if (lugar.lugar_tipo === "salon") return lugar.salon_slug ? null : "Elegi el salon del evento.";
-  if (!lugar.direccion.trim() || !lugar.localidad.trim() || !lugar.provincia.trim() || !lugar.pais.trim()) {
+  if (!lugar.direccion.trim() || !lugar.localidad.trim() || (!lugar.provincia.trim() && !lugar.geoname_id) || !lugar.pais.trim()) {
     return "Completa direccion, localidad, provincia y pais.";
   }
   return null;
@@ -49,7 +52,9 @@ export function lugarParaGuardar(lugar: DatosLugar) {
     provincia: lugar.provincia.trim(),
     pais: lugar.pais.trim(),
     latitud: lugar.latitud,
-    longitud: lugar.longitud
+    longitud: lugar.longitud,
+    geoname_id: lugar.geoname_id ?? null,
+    codigo_pais: lugar.codigo_pais ?? null
   };
 }
 
@@ -75,26 +80,32 @@ export function SelectorLugar({ valor, alCambiar }: SelectorLugarProps) {
   const mapaSalon = elegido ? urlMapaEmbebido(elegido) : null;
 
   const ubicarDireccion = () => {
-    const consulta = [valor.direccion, valor.localidad, valor.provincia, valor.pais]
-      .map((parte) => parte.trim())
-      .filter(Boolean)
-      .join(", ");
+    const consulta = valor.localidad.trim();
     if (consulta.length < 3) {
-      setAviso("Carga la direccion para buscarla en el mapa.");
+      setAviso("Elegi o escribi una localidad para centrar el mapa.");
       return;
     }
     setBuscando(true);
     setAviso(null);
     setResultados([]);
-    api
-      .get<ResultadoBusqueda[]>("/ubicacion/geocodificar", { params: { q: consulta } })
+    const peticion = valor.geoname_id
+      ? api.get(`/geografia/localidades/${valor.geoname_id}`).then(r => [r.data])
+      : api.get("/geografia/localidades", { params: { q: consulta, codigo_pais: valor.codigo_pais || undefined } }).then(r => r.data.resultados);
+    peticion.then((localidades: Array<{ localidad: string; provincia: string; pais: string; latitud: number; longitud: number }>) => ({ data: localidades.map(r => ({
+      latitud: r.latitud, longitud: r.longitud, nombre: [r.localidad, r.provincia, r.pais].filter(Boolean).join(", ")
+    })) }))
       .then(({ data }) => {
         if (data.length === 0) {
-          setAviso("No encontramos esa direccion. Ubica el punto haciendo clic en el mapa.");
+          setAviso("No encontramos esa localidad. Ubica el punto haciendo clic en el mapa.");
           return;
         }
-        alCambiar({ latitud: data[0].latitud, longitud: data[0].longitud });
-        if (data.length > 1) setResultados(data);
+        if (data.length > 1) {
+          setResultados(data);
+          setAviso("Hay varias localidades. Elegi una para centrar el mapa.");
+        } else {
+          alCambiar({ latitud: data[0].latitud, longitud: data[0].longitud });
+          setAviso("El mapa muestra el centro de la localidad. Ajusta el marcador a la direccion exacta.");
+        }
       })
       .catch(() => setAviso("No se pudo consultar el mapa. Ubica el punto haciendo clic en el mapa."))
       .finally(() => setBuscando(false));
@@ -178,23 +189,16 @@ export function SelectorLugar({ valor, alCambiar }: SelectorLugarProps) {
                 onChange={(e) => alCambiar({ direccion: e.target.value })}
               />
             </label>
-            <label>
-              Localidad
-              <input value={valor.localidad} onChange={(e) => alCambiar({ localidad: e.target.value })} />
-            </label>
-            <label>
-              Provincia
-              <input value={valor.provincia} onChange={(e) => alCambiar({ provincia: e.target.value })} />
-            </label>
-            <label>
-              Pais
-              <input value={valor.pais} onChange={(e) => alCambiar({ pais: e.target.value })} />
-            </label>
+            <LocalidadAutocomplete preservarPin valor={valor} alCambiar={geo => alCambiar({
+              localidad: geo.localidad, provincia: geo.provincia, pais: geo.pais,
+              geoname_id: geo.geoname_id, codigo_pais: geo.codigo_pais,
+              latitud: geo.latitud ?? null, longitud: geo.longitud ?? null
+            })} />
           </div>
           <div className="selector-lugar-acciones">
             <button className="secondary-button" type="button" onClick={ubicarDireccion} disabled={buscando}>
               <Search size={18} aria-hidden="true" />
-              {buscando ? "Buscando..." : "Ubicar direccion en el mapa"}
+              {buscando ? "Buscando..." : "Ubicar localidad en el mapa"}
             </button>
             <button className="secondary-button" type="button" onClick={usarUbicacionActual}>
               <LocateFixed size={18} aria-hidden="true" />
@@ -205,11 +209,14 @@ export function SelectorLugar({ valor, alCambiar }: SelectorLugarProps) {
             <label>
               Encontramos varias coincidencias
               <select
+                defaultValue=""
                 onChange={(e) => {
+                  if (e.target.value === "") return;
                   const resultado = resultados[Number(e.target.value)];
                   alCambiar({ latitud: resultado.latitud, longitud: resultado.longitud });
                 }}
               >
+                <option value="" disabled>Elegi una localidad</option>
                 {resultados.map((resultado, indice) => (
                   <option key={resultado.nombre} value={indice}>
                     {resultado.nombre}

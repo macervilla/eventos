@@ -41,13 +41,33 @@ def crear_token_sesion(usuario: User) -> str:
     )
 
 
-def crear_token_enlace(email: str) -> str:
+def crear_token_enlace(email: str, usuario_id: int | None = None) -> str:
     """Token del enlace magico que se envia por mail: prueba que la persona controla el email."""
-    return _firmar({"tipo": "enlace", "email": email.strip().lower()}, MINUTOS_ENLACE)
+    datos = {"tipo": "enlace", "email": email.strip().lower()}
+    if usuario_id is not None:
+        datos["usuario_id"] = usuario_id
+    return _firmar(datos, MINUTOS_ENLACE)
 
 
 def leer_email_de_enlace(token: str) -> str:
     return str(_leer(token, "enlace")["email"])
+
+
+def leer_cuenta_de_enlace(token: str) -> tuple[str, int | None]:
+    datos = leer_datos_enlace(token)
+    return str(datos["email"]), datos.get("usuario_id")
+
+
+def leer_datos_enlace(token: str) -> dict:
+    try:
+        datos = _leer(token, "enlace")
+    except HTTPException:
+        datos = _leer(token, "bienvenida")
+    return datos
+
+
+def crear_token_bienvenida(usuario: User, destino: str | None = None) -> str:
+    return _firmar({"tipo": "bienvenida", "email": usuario.email, "usuario_id": usuario.id, "destino": destino}, 48 * 60)
 
 
 def crear_token_alta(slug: str) -> str:
@@ -83,6 +103,8 @@ def obtener_usuario_actual(
     usuario = db.get(User, int(datos["sub"]))
     if usuario is None or not usuario.activo:
         raise HTTPException(status_code=401, detail="Usuario inactivo")
+    if datos.get("email") != usuario.email:
+        raise HTTPException(status_code=401, detail="El email de la cuenta cambio. Inicia sesion nuevamente")
     return usuario
 
 
@@ -92,7 +114,7 @@ def exigir_duenio_proveedor(db: Session, slug: str, usuario: User) -> Proveedor:
     )
     if proveedor is None:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
-    if proveedor.usuario_id != usuario.id:
+    if proveedor.usuario_id != usuario.id and not usuario.es_superadministrador:
         raise HTTPException(status_code=403, detail="No administras este proveedor")
     return proveedor
 
