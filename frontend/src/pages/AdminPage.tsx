@@ -1,3 +1,4 @@
+import { useConfirmacion } from "../components/useConfirmacion";
 import axios from "axios";
 import { Activity, ArrowLeft, CalendarDays, LogOut, Mail, Pencil, RefreshCw, ShieldCheck, Store, Users } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
@@ -6,6 +7,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { cerrarSesion } from "../api/sesion";
 import { Ventana } from "../components/Ventana";
+import { UsuariosEventoAdmin } from "../components/UsuariosEventoAdmin";
 
 type Usuario = { id: number; nombre: string | null; email: string; activo: boolean; es_superadministrador: boolean };
 type Evento = { id: number; nombre: string; slug: string; propietario_email: string; activo: boolean; estado: string; fecha_inicio: string | null };
@@ -19,6 +21,7 @@ type Resumen = {
 const TAMANO = 25;
 
 export function AdminPage() {
+  const { confirmar, ventanaConfirmacion } = useConfirmacion();
   const navigate = useNavigate();
   const [resumen, setResumen] = useState<Resumen | null>(null);
   const [usuarios, setUsuarios] = useState<Pagina<Usuario>>({ items: [], total: 0 });
@@ -38,6 +41,7 @@ export function AdminPage() {
   const [emailEdicion, setEmailEdicion] = useState("");
   const [errorEdicion, setErrorEdicion] = useState<string | null>(null);
   const [enviandoId, setEnviandoId] = useState<number | null>(null);
+  const [eventoUsuarios, setEventoUsuarios] = useState<Evento | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -67,7 +71,7 @@ export function AdminPage() {
   async function cambiar(tipo: "usuarios" | "eventos", item: Usuario | Evento) {
     const nombre = "email" in item ? item.email : item.nombre;
     const accion = item.activo ? "Desactivar" : "Activar";
-    if (!window.confirm(`${accion} ${nombre}?${tipo === "usuarios" && item.activo ? " Se bloqueara su acceso, incluso con una sesion abierta." : ""}`)) return;
+    if (!await confirmar(`${accion} ${nombre}?${tipo === "usuarios" && item.activo ? " Se bloqueara su acceso, incluso con una sesion abierta." : ""}`, `${accion} cuenta o evento`, accion)) return;
     setGuardando(true); setError(null); setAviso(null);
     try {
       await api.patch(`/administracion/${tipo}/${item.id}`, { activo: !item.activo });
@@ -121,6 +125,7 @@ export function AdminPage() {
 
   const bloqueado = cargando || guardando;
   return <main className="admin-page">
+    {ventanaConfirmacion}
     <header className="admin-header">
       <div><Link to="/" className="admin-back"><ArrowLeft size={16} /> Volver al portal</Link>
         <p className="eyebrow"><ShieldCheck size={17} /> Superadministrador</p>
@@ -162,7 +167,7 @@ export function AdminPage() {
       <section className="admin-panel" aria-labelledby="admin-eventos">
         <div className="admin-panel-heading"><div><h2 id="admin-eventos">Eventos</h2><p>Desactivar oculta el evento. Reactivar conserva su estado de publicacion.</p></div><span>{eventos.total} resultados</span></div>
         <div className="admin-table-wrap"><table><thead><tr><th>Evento</th><th>Organizador</th><th>Publicacion</th><th>Estado</th><th>Accion</th></tr></thead><tbody>
-          {eventos.items.map(e => <tr key={e.id}><td><strong>{e.nombre}</strong><small>/{e.slug}</small><small>{e.fecha_inicio ? new Date(e.fecha_inicio).toLocaleString("es-AR") : "Fecha a definir"}</small></td><td>{e.propietario_email}</td><td>{e.estado.replace(/_/g, " ")}</td><td><Estado activo={e.activo} /></td><td><div className="admin-user-actions">{e.activo && <><Link className="secondary-button" to={`/e/${e.slug}`}><Pencil size={15} /> Editar evento</Link><Link className="secondary-button" to={`/e/${e.slug}/invitados`}>Invitados</Link></>}<button className="secondary-button" disabled={bloqueado} onClick={() => void cambiar("eventos", e)}>{e.activo ? "Desactivar" : "Activar"}</button></div></td></tr>)}
+          {eventos.items.map(e => <tr key={e.id}><td><strong>{e.nombre}</strong><small>/{e.slug}</small><small>{e.fecha_inicio ? new Date(e.fecha_inicio).toLocaleString("es-AR") : "Fecha a definir"}</small></td><td>{e.propietario_email}</td><td>{e.estado.replace(/_/g, " ")}</td><td><Estado activo={e.activo} /></td><td><div className="admin-user-actions"><button className="secondary-button" disabled={bloqueado} aria-label={`Usuarios de ${e.nombre}`} onClick={() => setEventoUsuarios(e)}><Users size={15} /> Usuarios</button>{e.activo && <><Link className="secondary-button" to={`/e/${e.slug}`}><Pencil size={15} /> Editar evento</Link><Link className="secondary-button" to={`/e/${e.slug}/invitados`}>Invitados</Link></>}<button className="secondary-button" disabled={bloqueado} onClick={() => void cambiar("eventos", e)}>{e.activo ? "Desactivar" : "Activar"}</button></div></td></tr>)}
           {!eventos.items.length && <tr><td colSpan={5}>No hay eventos para esta busqueda.</td></tr>}
         </tbody></table></div>
         <Paginacion pagina={paginaEventos} total={eventos.total} bloqueado={bloqueado} cambiar={setPaginaEventos} />
@@ -176,6 +181,7 @@ export function AdminPage() {
         <Paginacion pagina={paginaNegocios} total={negocios.total} bloqueado={bloqueado} cambiar={setPaginaNegocios} />
       </section>
     </>}
+    {eventoUsuarios && <UsuariosEventoAdmin evento={eventoUsuarios} alCerrar={() => setEventoUsuarios(null)} alCambiar={() => void cargar()} />}
     {editando && <Ventana titulo="Editar cuenta" alCerrar={() => { if (!guardando) setEditando(null); }}>
       <form className="admin-user-form" onSubmit={guardarUsuario}>
         <label htmlFor="admin-nombre">Nombre<input autoFocus id="admin-nombre" value={nombreEdicion} maxLength={160} disabled={guardando} onChange={e => setNombreEdicion(e.target.value)} /></label>

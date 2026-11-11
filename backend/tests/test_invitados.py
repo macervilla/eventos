@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import func, select
 
-from app.core.seguridad import crear_token_sesion
+from tests.autenticacion import token_google
 from app.models.enums import EventoEstado, RolEvento
 from app.models.eventos import Evento, EventoUsuario
 from app.models.invitaciones import (
@@ -68,7 +68,7 @@ def test_qr_se_envia_al_aprobar_y_fallo_no_deshace_confirmacion(contexto, monkey
 
 
 def auth(u):
-    return {"Authorization": "Bearer " + crear_token_sesion(u)}
+    return {"Authorization": "Bearer " + token_google(u)}
 
 
 def habilitar(client, owner, **datos):
@@ -511,9 +511,12 @@ def test_pin_cambio_metodo_y_limite_de_intentos(contexto):
         ).status_code
         == 401
     )
+    personal = client.post(f"/invitados/prueba/lista/{inv['id']}/pin-personal", headers=auth(owner), json={"canal":"presencial"}).json()["pin"]
     valido = client.post(
         "/invitados/prueba/portal/validar", json={"token": token, "pin": "123456"}
     ).json()
+    assert "validado" not in valido  # El PIN compartido anterior ya no valida identidad.
+    valido = client.post("/invitados/prueba/portal/validar", json={"token": token, "pin": personal}).json()
     assert valido["validado"]
     habilitar(client, owner, validacion="email", quitar_pin=True)
     assert confirmar(client, token, sesion=valido["sesion"]).status_code == 401
@@ -530,7 +533,7 @@ def test_pin_cambio_metodo_y_limite_de_intentos(contexto):
 def test_otp_vencido_y_proveedor_no_configurado(contexto, monkeypatch, capsys):
     client, db, _, owner, _ = contexto
     habilitar(client, owner, validacion="email", otp_intentos=1)
-    inv = crear(client, owner, email="ana@example.com")
+    inv = crear(client, owner, email="ana@example.com", telefono="+54 9 2966 123456")
     token = enlace(client, owner, inv)
     monkeypatch.setattr("app.services.invitados_portal._send_email", lambda *a: None)
     assert (
@@ -562,7 +565,7 @@ def test_otp_vencido_y_proveedor_no_configurado(contexto, monkeypatch, capsys):
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as error:
-        _send_email("", "Codigo", "secreto-123456", "secreto-123456")
+        _send_email("ana@example.com", "Codigo", "secreto-123456", "secreto-123456")
     assert error.value.status_code == 503 and "secreto-123456" not in capsys.readouterr().out
 
 

@@ -6,7 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app.core.seguridad import crear_token_enlace, crear_token_sesion
+from app.core.seguridad import crear_token_enlace
+from tests.autenticacion import token_google
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -38,7 +39,7 @@ def contexto():
 
 
 def auth(usuario):
-    return {"Authorization": f"Bearer {crear_token_sesion(usuario)}"}
+    return {"Authorization": f"Bearer {token_google(usuario)}"}
 
 
 def test_solo_superadministrador(contexto):
@@ -57,8 +58,8 @@ def test_login_admin_sin_eventos(contexto):
     assert respuesta.status_code == 200
     datos = respuesta.json()
     assert datos["token"]
-    assert datos["opciones"][0]["path"] == "/administracion"
-    assert client.get("/administracion/resumen", headers={"Authorization": f"Bearer {datos['token']}"}).status_code == 200
+    assert datos["opciones"] == [] and datos["requiere_google"]
+    assert client.get("/administracion/resumen", headers={"Authorization": f"Bearer {datos['token']}"}).status_code == 401
 
 
 def test_desactivar_y_reactivar_usuario_revoca_acceso(contexto):
@@ -178,8 +179,8 @@ def test_reenvia_al_correo_corregido_con_enlace_funcional(contexto, monkeypatch)
     assert "token" not in respuesta.json()
     acceso = client.post("/acceso/enlace", json={"token": envios[0][1]}).json()
     assert acceso["token"]
-    assert any(opcion["id"] == evento.id and opcion["tipo"] == "evento" for opcion in acceso["opciones"])
-    assert client.get("/acceso/yo", headers={"Authorization": f"Bearer {acceso['token']}"}).status_code == 200
+    assert acceso["opciones"] == [] and acceso["requiere_google"]
+    assert client.get("/acceso/yo", headers={"Authorization": f"Bearer {acceso['token']}"}).status_code == 401
 
 
 def test_reenvio_inactivo_inexistente_y_falla_smtp(contexto, monkeypatch):
@@ -218,17 +219,16 @@ def test_email_duplicado_reenvio_y_sesion_no_cambian_de_cuenta(contexto, monkeyp
     assert client.post(f"/administracion/usuarios/{usuario.id}/reenviar-acceso", headers=auth(admin)).status_code == 200
     assert len(envios) == 1
     acceso = client.post("/acceso/enlace", json={"token": envios[0][1]}).json()
-    assert any(op["tipo"] == "evento" and op["id"] == evento.id for op in acceso["opciones"])
-    assert not any(op["tipo"] == "administracion" for op in acceso["opciones"])
+    assert acceso["opciones"] == [] and acceso["requiere_google"]
     cabeceras = {"Authorization": f"Bearer {acceso['token']}"}
-    assert client.get("/administracion/usuarios", headers=cabeceras).status_code == 403
-    assert not any(op["tipo"] == "administracion" for op in client.get("/acceso/yo", headers=cabeceras).json()["opciones"])
+    assert client.get("/administracion/usuarios", headers=cabeceras).status_code == 401
+    assert client.get("/acceso/yo", headers=cabeceras).status_code == 401
     assert client.post("/acceso/enlace", json={"token": crear_token_enlace(admin.email)}).status_code == 409
     envios.clear()
     assert client.post("/acceso/solicitar-enlace", json={"email": admin.email}).status_code == 200
     assert len(envios) == 2
     accesos = [client.post("/acceso/enlace", json={"token": envio[1]}).json() for envio in envios]
-    assert sum(any(op["tipo"] == "administracion" for op in a["opciones"]) for a in accesos) == 1
+    assert all(a["requiere_google"] and a["opciones"] == [] for a in accesos)
 
 
 def test_google_duplicado_solo_admite_identidad_previamente_vinculada(contexto, monkeypatch):

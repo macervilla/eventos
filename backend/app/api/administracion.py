@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -7,11 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.core.seguridad import obtener_usuario_actual
 from app.db.session import get_db
-from app.models.enums import EventoEstado
-from app.models.eventos import Evento
+from app.models.enums import EventoEstado, RolEvento
+from app.models.eventos import Evento, EventoUsuario
+from app.models.invitaciones import MovimientoInvitacion
 from app.models.proveedores import Proveedor
 from app.models.usuarios import User
 from app.services.acceso import solicitar_enlace_acceso
+from app.services.invitados_permisos import asignacion_con_acceso
 
 
 def exigir_superadministrador(usuario: User = Depends(obtener_usuario_actual)) -> User:
@@ -169,3 +172,92 @@ def proveedores(q: str = "", offset: int = Query(0, ge=0), limit: int = Query(25
         {"id": p.id, "nombre": p.nombre_comercial, "slug": p.slug, "activo": p.activo, "propietario_email": email}
         for p, email in db.execute(consulta.order_by(Proveedor.id.desc()).offset(offset).limit(limit))
     ]}
+
+
+class AsignacionEventoRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rol: Literal["PROPIETARIO", "ADMIN_EVENTO", "AGASAJADO", "GESTOR_INVITADOS",
+                 "CONTROL_INGRESO", "ENCARGADO"]
+
+
+def _evento_asignaciones(db: Session, evento_id: int, bloquear=False) -> Evento:
+    consulta = select(Evento).where(Evento.id == evento_id)
+    evento = db.scalar(consulta.with_for_update() if bloquear else consulta)
+    if evento is None:
+        raise HTTPException(404, "Evento no encontrado")
+    return evento
+
+
+@router.get("/eventos/{evento_id}/usuarios")
+def usuarios_evento(evento_id: int, db: Session = Depends(get_db)) -> dict:
+    evento = _evento_asignaciones(db, evento_id)
+    asignaciones = db.scalars(select(EventoUsuario).where(EventoUsuario.evento_id == evento.id)).all()
+    por_usuario = {}
+    for asignacion in asignaciones:
+        if asignacion.permisos != []:
+            por_usuario.setdefault(asignacion.usuario_id, []).append(asignacion)
+    cuentas = db.scalars(select(User).where(or_(
+        User.id == evento.propietario_id, User.id.in_(por_usuario),
+        User.es_superadministrador.is_(True),
+    )).order_by(User.id)).all()
+    return {"propietario_id": evento.propietario_id, "items": [
+        {**usuario_read(u), "es_propietario": u.id == evento.propietario_id,
+         "roles": [a.rol.value for a in por_usuario.get(u.id, [])],
+         "acceso_efectivo": u.activo and (u.es_superadministrador or u.id == evento.propietario_id
+             or any(asignacion_con_acceso(a) for a in por_usuario.get(u.id, [])))}
+        for u in cuentas
+    ]}
+
+
+@router.put("/eventos/{evento_id}/usuarios/{usuario_id}")
+def asignar_usuario_evento(evento_id: int, usuario_id: int, data: AsignacionEventoRequest,
+                          db: Session = Depends(get_db),
+                          actor: User = Depends(exigir_superadministrador)) -> dict:
+    evento = _evento_asignaciones(db, evento_id, bloquear=True)
+    usuario = db.get(User, usuario_id)
+    if usuario is None:
+        raise HTTPException(404, "Usuario no encontrado")
+    if not usuario.activo:
+        raise HTTPException(409, "Activa la cuenta antes de asignarla al evento")
+    anterior = evento.propietario_id
+    if data.rol == "PROPIETARIO":
+        # Transferir y retirar el acceso del propietario anterior en la misma transaccion.
+        for a in db.scalars(select(EventoUsuario).where(EventoUsuario.evento_id == evento.id)):
+            if (a.usuario_id == anterior and anterior != usuario.id) or a.rol == RolEvento.PROPIETARIO:
+                a.permisos = []
+        evento.propietario_id = usuario.id
+    asignacion = db.scalar(select(EventoUsuario).where(
+        EventoUsuario.evento_id == evento.id, EventoUsuario.usuario_id == usuario.id,
+        EventoUsuario.rol == RolEvento(data.rol),
+    ))
+    if asignacion is None:
+        asignacion = EventoUsuario(evento_id=evento.id, usuario_id=usuario.id, rol=RolEvento(data.rol))
+        db.add(asignacion)
+    # Restablecer defaults del rol tambien al reactivar una asignacion revocada.
+    asignacion.permisos = None
+    db.add(MovimientoInvitacion(evento_id=evento.id, actor_id=actor.id,
+        accion="admin_asignar_usuario", datos={"usuario_id": usuario.id, "rol": data.rol,
+            "propietario_anterior_id": anterior}))
+    db.commit()
+    return usuarios_evento(evento.id, db)
+
+
+@router.delete("/eventos/{evento_id}/usuarios/{usuario_id}")
+def quitar_usuario_evento(evento_id: int, usuario_id: int, db: Session = Depends(get_db),
+                         actor: User = Depends(exigir_superadministrador)) -> dict:
+    evento = _evento_asignaciones(db, evento_id, bloquear=True)
+    if evento.propietario_id == usuario_id:
+        raise HTTPException(409, "Asigna primero otro propietario para quitar esta cuenta")
+    usuario = db.get(User, usuario_id)
+    if usuario is None:
+        raise HTTPException(404, "Usuario no encontrado")
+    asignaciones = db.scalars(select(EventoUsuario).where(
+        EventoUsuario.evento_id == evento.id, EventoUsuario.usuario_id == usuario_id,
+    )).all()
+    for asignacion in asignaciones:
+        asignacion.permisos = []
+    db.add(MovimientoInvitacion(evento_id=evento.id, actor_id=actor.id,
+        accion="admin_quitar_usuario", datos={"usuario_id": usuario_id,
+            "roles": [a.rol.value for a in asignaciones]}))
+    db.commit()
+    return usuarios_evento(evento.id, db)

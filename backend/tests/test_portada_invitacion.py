@@ -14,13 +14,13 @@ def test_portada_vertical_y_cache_se_actualiza_con_los_textos(tmp_path, monkeypa
     evento = SimpleNamespace(
         portada_url="/media/foto.png", salon=None, localidad="Salon 1",
         portada_encuadre=None, titulo_visual="Te invito a mi cumple, Liliana",
-        nombre="Cumple", tipografia="sistema", uuid="prueba",
+        nombre="Cumple", tipografia="sistema", uuid="prueba", modulos=[], template_key="classic",
         fecha_inicio=datetime(2026, 11, 15, 0, 30, tzinfo=UTC),
     )
     url = portada.imagen_invitacion(evento)
     archivo = storage._safe_path(url.removeprefix("/media/"))
     with Image.open(archivo) as imagen:
-        assert imagen.width == 1080 and imagen.height >= 1680
+        assert imagen.width == 1200 and imagen.height >= 1680
         assert imagen.crop((60, 350, 1020, 1000)).getextrema()[0][1] > 245
     assert portada.imagen_invitacion(evento) == url
     evento.titulo_visual = "Otro titulo"

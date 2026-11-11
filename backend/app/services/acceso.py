@@ -16,11 +16,11 @@ from app.core.seguridad import (
     leer_datos_enlace,
 )
 from app.models.eventos import Evento, EventoUsuario
-from app.models.enums import EventoEstado
 from app.models.proveedores import Proveedor
 from app.models.usuarios import User
 from app.schemas.acceso import AccessOption, AccessResponse
 from app.services.email import send_access_link_email
+from app.services.invitados_permisos import asignacion_con_acceso
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ def get_access_options_by_email(db: Session, email: str) -> AccessResponse:
     return get_access_options_by_user(db, user)
 
 
-def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool = False) -> AccessResponse:
+def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool = False, *, metodo: str = "email", email_google: str | None = None) -> AccessResponse:
     if not user.activo:
         return AccessResponse(email=user.email, opciones=[])
     if incluir_vinculadas and user.google_subject:
@@ -106,10 +106,10 @@ def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool
             opciones = []
             vistos = set()
             for cuenta in cuentas:
-                for opcion in get_access_options_by_user(db, cuenta).opciones:
+                for opcion in get_access_options_by_user(db, cuenta, metodo=metodo, email_google=email_google).opciones:
                     clave = (opcion.tipo, opcion.id)
                     if clave not in vistos:
-                        opcion.token = crear_token_sesion(cuenta)
+                        opcion.token = crear_token_sesion(cuenta, metodo=metodo, email_google=email_google)
                         opciones.append(opcion)
                         vistos.add(clave)
             return AccessResponse(email=user.email, usuario_id=user.id, opciones=opciones, email_validado=bool(user.email_validado_en), google_vinculado=True)
@@ -121,8 +121,12 @@ def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool
         )
     ).all()
 
-    # Subconsulta en lugar de JOIN + DISTINCT: Postgres no puede aplicar DISTINCT a columnas JSON.
-    eventos_como_miembro = select(EventoUsuario.evento_id).where(EventoUsuario.usuario_id == user.id)
+    # Usar los mismos permisos efectivos que las operaciones, sin comparar JSON como texto.
+    eventos_como_miembro = {
+        asignacion.evento_id
+        for asignacion in db.scalars(select(EventoUsuario).where(EventoUsuario.usuario_id == user.id))
+        if asignacion_con_acceso(asignacion)
+    }
     eventos = db.scalars(
         select(Evento)
         .where(
@@ -167,11 +171,13 @@ def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool
     return AccessResponse(email=user.email, usuario_id=user.id, opciones=opciones, email_validado=bool(user.email_validado_en), google_vinculado=bool(user.google_subject))
 
 
-def _respuesta_con_sesion(db: Session, usuario: User) -> AccessResponse:
-    """Solo se llama con un email ya verificado (Google o enlace magico)."""
-    respuesta = get_access_options_by_user(db, usuario, incluir_vinculadas=True)
+def _respuesta_con_sesion(db: Session, usuario: User, *, metodo: str = "email", email_google: str | None = None) -> AccessResponse:
+    """Un enlace valida correo; solo Google produce credenciales administrativas."""
+    respuesta = (get_access_options_by_user(db, usuario, incluir_vinculadas=True, metodo=metodo, email_google=email_google)
+                 if metodo == "google" else AccessResponse(email=usuario.email, opciones=[],
+                     email_validado=True, google_vinculado=bool(usuario.google_subject), requiere_google=True))
     if usuario.activo:
-        respuesta.token = crear_token_sesion(usuario)
+        respuesta.token = crear_token_sesion(usuario, metodo=metodo, email_google=email_google)
     return respuesta
 
 
@@ -189,8 +195,9 @@ def get_access_options_by_google_token(db: Session, credential: str, actual: Use
             # La vinculacion inicial requiere la sesion obtenida al validar ese email.
             if actual is None or actual.email.lower() != profile["email"] or not actual.email_validado_en:
                 continue
+        vinculada = cuenta.google_subject == profile["sub"]
         cuenta.google_subject = profile["sub"]
-        if autoridad and cuenta.email_validado_en is None:
+        if (autoridad or vinculada) and cuenta.email_validado_en is None:
             cuenta.email_validado_en = datetime.now(UTC)
         elif not autoridad and actual is not None and cuenta.email_validado_en is None:
             cuenta.email_validado_en = actual.email_validado_en
@@ -209,7 +216,7 @@ def get_access_options_by_google_token(db: Session, credential: str, actual: Use
         raise HTTPException(403, "Para vincular este correo con Google por primera vez, valida tu email e ingresa desde la sesion inicial")
     usuario = disponibles[0]
     db.commit()
-    return _respuesta_con_sesion(db, usuario)
+    return _respuesta_con_sesion(db, usuario, metodo="google", email_google=profile["email"])
 
 
 def solicitar_enlace_acceso(db: Session, email: str, destino: str | None = None,
@@ -229,10 +236,5 @@ def iniciar_sesion_con_enlace(db: Session, token: str) -> AccessResponse:
         return AccessResponse(email=email, opciones=[])
     if usuario.email_validado_en is None:
         usuario.email_validado_en = datetime.now(UTC)
-    if datos["tipo"] == "bienvenida" and str(datos.get("destino") or "").startswith("/e/"):
-        slug = datos["destino"].removeprefix("/e/")
-        evento = db.scalar(select(Evento).where(Evento.slug == slug, Evento.propietario_id == usuario.id, Evento.activo.is_(True)))
-        if evento and evento.estado == EventoEstado.BORRADOR:
-            evento.estado = EventoEstado.PUBLICADO
     db.commit()
     return _respuesta_con_sesion(db, usuario)

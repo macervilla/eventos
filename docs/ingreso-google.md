@@ -1,6 +1,6 @@
 # Ingreso habitual con Google y validacion inicial
 
-Actualizacion del 02/11/2026.
+Actualizacion del 04/11/2026. Ver [identidad y autorizacion](identidad-y-autorizacion.md).
 
 La barra superior de todas las paginas muestra el acceso al sistema, Mis sitios
 cuando hay una sesion y el control para cerrar sesion. El cierre elimina la
@@ -17,9 +17,9 @@ Una falla SMTP no se marca como entrega ni elimina el sitio registrado; la
 respuesta informa el error sin invitar a crear el mismo sitio nuevamente.
 
 El enlace inicial vence en 48 horas. Valida el email y permite vincular Google
-desde esa sesion. Si la bienvenida corresponde a un evento, confirma solo ese
-evento, nunca otros borradores de la cuenta. Los enlaces iniciales antiguos de
-confirmacion de eventos y de recuperacion siguen siendo compatibles.
+desde una prueba temporal de correo sin permisos administrativos. No publica
+eventos ni concede acceso a herramientas de gestion. Los enlaces iniciales antiguos
+siguen validando el email, pero requieren ingresar con Google para administrar.
 
 Una cuenta Gmail/Workspace validada por Google puede acreditar el email sin un
 nuevo correo. Los ingresos habituales con Google no llaman al servicio SMTP.

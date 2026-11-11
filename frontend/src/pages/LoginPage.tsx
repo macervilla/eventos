@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
-import { guardarTokenSesion, seleccionarCuentaSesion, obtenerTokenSesion } from "../api/sesion";
+import { guardarTokenSesion, guardarValidacionEmail, obtenerValidacionEmail, seleccionarCuentaSesion, obtenerTokenSesion } from "../api/sesion";
 import { GoogleSignIn } from "../components/GoogleSignIn";
 
 type AccessOption = {
@@ -17,6 +17,7 @@ type AccessOption = {
 };
 
 type AccessResponse = {
+  requiere_google?: boolean;
   google_vinculado?: boolean;
   email_validado?: boolean;
   email: string;
@@ -83,10 +84,10 @@ export function LoginPage() {
       .post<AccessResponse>("/acceso/enlace", { token: tokenEnlace })
       .then((response) => {
         setEmail(response.data.email);
-        if (response.data.token && response.data.google_vinculado === false) {
-          guardarTokenSesion(response.data.token);
-          setOptions(response.data.opciones);
-          setAviso("Email validado. Selecciona tu cuenta de Google para vincularla una vez y usarla en tus proximos ingresos.");
+        if (response.data.token && response.data.requiere_google) {
+          guardarValidacionEmail(response.data.token);
+          setOptions([]);
+          setAviso("Email validado. Para administrar tus sitios, inicia sesion con tu cuenta de Google.");
           return;
         }
         resolveAccess(response.data, destinoSeguro(searchParams.get("destino")));
@@ -123,7 +124,8 @@ export function LoginPage() {
     setAviso(null);
     setOptions([]);
     setGoogleLoading(true);
-    api.post<AccessResponse>("/acceso/google", { credential })
+    const validacionEmail = obtenerValidacionEmail();
+    api.post<AccessResponse>("/acceso/google", { credential }, validacionEmail ? { headers: { Authorization: `Bearer ${validacionEmail}` } } : undefined)
       .then(response => {
         setEmail(response.data.email);
         resolveAccess(response.data, destinoSeguro(searchParams.get("destino")));

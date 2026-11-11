@@ -93,7 +93,8 @@ def test_bienvenida_confirma_solo_el_evento_de_su_destino(contexto):
     db.add(otro); db.commit()
     respuesta = client.post("/acceso/enlace", json={"token": crear_token_bienvenida(usuario, f"/e/{evento.slug}")})
     assert respuesta.status_code == 200
-    assert evento.estado == EventoEstado.PUBLICADO and otro.estado == EventoEstado.BORRADOR
+    assert evento.estado == EventoEstado.BORRADOR and otro.estado == EventoEstado.BORRADOR
+    assert respuesta.json()["requiere_google"]
 
 
 def test_alta_eventos_verificada_no_reenvia_y_no_publica_por_solo_escribir_email(contexto, monkeypatch):

@@ -11,7 +11,8 @@ class Datos(BaseModel):
 class ConfigInvitados(Datos):
     activo: bool = False
     aprobacion: Literal["automatica", "manual"] = "manual"
-    validacion: Literal["enlace", "email", "telefono"] = "enlace"
+    validacion: Literal["enlace", "email", "telefono", "pin"] = "enlace"
+    verificar_invitados: bool | None = None
     requiere_login: bool = True
     permitir_modificaciones: bool = True
     cierre_rsvp: datetime | None = None
@@ -48,9 +49,24 @@ class AsignacionRol(Datos):
     solo_responsable: bool = False
 
 
+class ContactoAgasajado(Datos):
+    email: EmailStr
+    canal: Literal["email", "whatsapp", "instagram", "messenger", "telegram"] = "email"
+    destinatario: str = Field(default="", max_length=255)
+
+
 class AsignarAgasajados(Datos):
     emails: list[EmailStr] = Field(min_length=1, max_length=20)
     solo_responsable: bool = False
+    contactos: list[ContactoAgasajado] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validar_contactos(self):
+        emails = {str(email).lower() for email in self.emails}
+        contactos = [str(c.email).lower() for c in self.contactos]
+        if len(contactos) != len(set(contactos)) or not set(contactos) <= emails:
+            raise ValueError("Cada contacto debe corresponder a un email de la asignacion, sin duplicados")
+        return self
 
 
 class RSVP(Datos):
@@ -90,6 +106,10 @@ class PortalAcceso(Datos):
 
 class PortalRSVP(PortalAcceso):
     rsvp: RSVP
+
+
+class EntregaPin(Datos):
+    canal: Literal["presencial", "llamada", "canal_independiente"]
 
 
 class Escaneo(Datos):

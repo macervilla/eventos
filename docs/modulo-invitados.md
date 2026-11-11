@@ -1,3 +1,6 @@
+Nota de seguridad 04/11/2026: la politica vigente de identidad, PIN individual y
+verificacion de invitados esta documentada en [identidad y autorizacion](identidad-y-autorizacion.md).
+
 # Invitados, invitaciones y control de ingreso
 
 ## Uso
@@ -229,3 +232,37 @@ Para un chat dirigido usar el boton explicito de WhatsApp.
 Pruebas: `python -m pytest backend/tests/test_whatsapp.py -q` y
 `python scripts/verificar-whatsapp-ui.py` (API simulada, sin enviar mensajes).
 
+
+
+## Altas y bajas de agasajados
+
+La asignacion de agasajados permite elegir el canal de aviso por contacto: email,
+WhatsApp, Instagram, Messenger o Telegram. La baja se realiza con Quitar y conserva
+el canal elegido. Solo se revocan los permisos de ese rol; los permisos de otros
+roles y el acceso de superadministrador se conservan.
+
+Los emails se envian mediante SMTP al confirmar el cambio. En WhatsApp y redes,
+la app prepara el mensaje y el administrador completa el envio. Un aviso preparado
+no se presenta como entregado. El texto y el resultado quedan registrados en la
+auditoria existente del evento. El ultimo aviso se consulta en la gestion de invitados;
+los correos fallidos pueden reintentarse sin repetir la asignacion o baja. Un aviso
+antiguo no puede reintentarse despues de una nueva alta o baja.
+
+El agasajado ve la invitacion y el apartado Mis invitados: puede agregar personas
+con la agenda del dispositivo (cuando el navegador lo permite), consultar quien
+lo agrego como agasajado y quien cargo cada invitado. Se respetan los permisos,
+el estado del modulo y el alcance de lista propia o compartida configurados.
+No se necesitan nuevas migraciones para esta funcionalidad.
+
+
+### Previsualizacion y reenvio
+
+En Gestion de invitados, **Previsualizar y configurar invitacion** muestra la portada sin enviar mensajes. El acceso **Configurar foto, textos y datos** abre el editor del evento para quienes tienen permiso.
+
+**Enviar / Reenviar** pide confirmacion y conserva el canal registrado de cada invitado, incluso en selecciones multiples. Si aun no tiene canal, usa el seleccionado en la barra. El correo se envia por SMTP; WhatsApp abre el chat con texto y enlace personal y requiere completar el envio en esa aplicacion. La foto puede descargarse desde Gestion de invitados para adjuntarla. Los resultados manuales se muestran en un panel breve, sin abrir la previsualizacion.
+
+
+El reenvio por WhatsApp permite **Compartir foto y mensaje** cuando el navegador admite compartir archivos. Se adjunta la portada JPG con el texto y enlace personal; el usuario elige WhatsApp y el destinatario. Si no admite archivos, usar **Descargar foto**, copiar el texto y adjuntar ambos en el chat. **Abrir WhatsApp (solo texto y enlace)** no adjunta la imagen. La ventana de envio no muestra una previsualizacion.
+
+
+El flujo de WhatsApp usa una sola ventana con destinatario y una accion principal: **Compartir foto y mensaje**. Esta accion abre el selector del dispositivo con el archivo JPG y enlace personal. Las alternativas quedan plegadas en **Mas opciones**. Si no se admite compartir archivos, se ofrece **Descargar foto y abrir chat**, indicando que debe adjuntarse manualmente. Se retiro la opcion de copiar la foto y no se pide una confirmacion previa adicional para WhatsApp. Los correos conservan la confirmacion antes del envio.

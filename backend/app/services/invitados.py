@@ -64,12 +64,16 @@ def configuracion(db, evento):
         "activo": bool(modulo and modulo.activo),
         "tiene_pin": bool(modulo and (modulo.configuracion_json or {}).get("pin_hash")),
     }
-    if (
-        resultado["requiere_login"]
-        and resultado["validacion"] == "enlace"
-        and not resultado["tiene_pin"]
-    ):
-        resultado["validacion"] = "email"
+    verificar = raw.get("verificar_invitados")
+    if verificar is None:
+        verificar = resultado["requiere_login"] or resultado["validacion"] != "enlace" or resultado["tiene_pin"]
+    resultado["verificar_invitados"] = bool(verificar)
+    resultado["requiere_login"] = bool(verificar)
+    if not verificar:
+        resultado["validacion"] = "enlace"
+    elif resultado["validacion"] == "enlace":
+        # Un PIN compartido de evento nunca acredita la identidad de un invitado.
+        resultado["validacion"] = "pin" if resultado["tiene_pin"] else "email"
     return resultado
 
 
@@ -157,6 +161,7 @@ def resumen_inv(inv, personales=True):
         "distribucion": inv.distribucion,
         "canal": inv.canal,
         "responsable_id": inv.responsable_id,
+        "tiene_pin_personal": bool(inv.pin_personal_hash),
         "adultos": inv.adultos,
         "menores": inv.menores,
         "confirmado_at": inv.confirmado_at,

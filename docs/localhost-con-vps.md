@@ -6,11 +6,14 @@ Las consultas, cambios y subidas de imagenes se procesan en el VPS y usan su
 PostgreSQL y su volumen de media. No se necesita exponer PostgreSQL ni copiar
 la clave de la base. El backend local no participa en estas solicitudes.
 
-## Activar en PowerShell
+Esta es la conexion predeterminada tanto con Docker Compose como con npm run dev.
+No hace falta un archivo override para usar los datos del VPS.
+
+## Iniciar en PowerShell
 
 ```powershell
 cd C:\mentoria\proyectosvs\eventos
-docker compose -f docker-compose.yml -f compose.local-vps.yml up -d --no-deps --force-recreate frontend
+docker compose up -d frontend
 ```
 
 Abrir http://localhost:5179 y recargar con Ctrl+F5. La sesion del sitio del VPS
@@ -38,10 +41,14 @@ Invoke-RestMethod http://localhost:5179/api-vps/health
 Debe devolver status=ok. Las URLs /media/... tambien se reenvian al backend del
 VPS, por lo que los archivos que aparecen en la base compartida se pueden leer.
 
-## Volver a la API y base locales
+## Desarrollo sin Docker
 
 ```powershell
-docker compose -f docker-compose.yml up -d --no-deps --force-recreate frontend
+cd frontend
+npm ci
+npm run dev
 ```
 
-No se borran los datos de la base local ni se cambian las variables del .env.
+El proxy y el cliente HTTP usan el VPS por defecto tambien en este modo.
+El frontend no requiere iniciar el backend ni PostgreSQL locales.
+El archivo compose.local-vps.yml se conserva por compatibilidad con comandos anteriores.

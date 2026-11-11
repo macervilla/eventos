@@ -12,7 +12,7 @@ Base técnica para una plataforma web/PWA de eventos con portal público, espaci
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose up -d --build frontend
 ```
 //ssh -N -L 15433:172.19.0.2:5432 vps
 
@@ -25,7 +25,7 @@ git push origin main
 Backend: http://localhost:8009/docs  
 Frontend: http://localhost:5179
 
-Para usar desde localhost los mismos datos e imagenes del VPS, consultar
+Localhost usa siempre por defecto la API, los datos y las imagenes del VPS. Consultar
 [localhost con API del VPS](docs/localhost-con-vps.md). Esta modalidad ejecuta
 el frontend local y realiza las operaciones con el backend de produccion.
 
@@ -323,3 +323,11 @@ En Gestion de invitados se pueden dar de alta, editar, dar de baja y reactivar i
 La plantilla XLSX incorpora WhatsApp, Facebook, Telegram y Otro contacto. La carga masiva conserva la vista previa, validacion por fila, control de duplicados y confirmacion explicita; las plantillas anteriores siguen funcionando y no borran los nuevos contactos al actualizar. El permiso de importar se administra por separado del permiso de editar invitados. Telegram se habilita entre los canales del evento y prepara un envio manual.
 
 El dashboard del superadministrador incluye accesos a editar eventos, gestionar invitados y editar negocios ajenos. Los permisos se validan en el backend. Para instalar los nuevos campos: `alembic upgrade head` (revision `0015_contactos_invitados`).
+tunel 
+ssh -N -L 15433:172.19.0.2:5432 vps
+
+
+git status
+git add .
+git commit -m "Agrega decision y ejecucion de multiples herramientas"
+git push origin main

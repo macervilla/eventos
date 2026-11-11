@@ -48,6 +48,20 @@ class AccesoInvitados:
     propio: bool
 
 
+def permisos_de_asignacion(asignacion: EventoUsuario) -> set[str]:
+    rol = asignacion.rol.value
+    return (DEFAULTS.get(rol, set()) if asignacion.permisos is None
+            else set(asignacion.permisos)) & ALLOWED.get(rol, set())
+
+
+def asignacion_con_acceso(asignacion: EventoUsuario) -> bool:
+    if asignacion.rol == RolEvento.PROPIETARIO:
+        return asignacion.permisos != []
+    if asignacion.rol == RolEvento.ENCARGADO:
+        return asignacion.permisos is None or "configurar_evento" in asignacion.permisos
+    return bool(permisos_de_asignacion(asignacion))
+
+
 def modulo_invitados(db, evento):
     return db.scalar(
         select(EventoModulo).where(
@@ -70,15 +84,11 @@ def acceso(
     admin = (
         usuario.es_superadministrador
         or evento.propietario_id == usuario.id
-        or any(a.rol == RolEvento.PROPIETARIO for a in asignaciones)
+        or any(a.rol == RolEvento.PROPIETARIO and asignacion_con_acceso(a) for a in asignaciones)
     )
     permisos, alcances = set(), []
     for a in asignaciones:
-        rol = a.rol.value
-        permitidos = ALLOWED.get(rol, set())
-        actuales = (
-            DEFAULTS.get(rol, set()) if a.permisos is None else set(a.permisos)
-        ) & permitidos
+        actuales = permisos_de_asignacion(a)
         if actuales:
             permisos |= actuales
             alcances.append(a.solo_responsable)

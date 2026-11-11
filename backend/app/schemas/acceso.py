@@ -33,6 +33,7 @@ class AccessOption(BaseModel):
 
 
 class AccessResponse(BaseModel):
+    requiere_google: bool = False
     usuario_id: int | None = None
     google_vinculado: bool = False
     email_validado: bool = False

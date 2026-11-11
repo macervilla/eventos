@@ -34,9 +34,17 @@ def _leer(token: str, tipo: str) -> dict:
     return datos
 
 
-def crear_token_sesion(usuario: User) -> str:
+def crear_token_sesion(usuario: User, *, metodo: str = "email", email_google: str | None = None) -> str:
+    if metodo not in {"google", "email"}:
+        raise HTTPException(403, "Metodo de autenticacion no admitido")
+    google = metodo == "google"
+    if google and (not usuario.google_subject or not usuario.email_validado_en):
+        raise HTTPException(403, "La sesion requiere Google y email verificado")
     return _firmar(
-        {"tipo": "sesion", "sub": str(usuario.id), "email": usuario.email},
+        {"tipo": "sesion" if google else "validacion_email", "sub": str(usuario.id),
+         "email": usuario.email, "amr": metodo,
+         "email_google": (email_google or usuario.email) if google else None,
+         "google_sub": usuario.google_subject if google else None},
         settings.access_token_expire_minutes,
     )
 
@@ -81,7 +89,7 @@ def validar_token_alta(token: str | None, slug: str) -> None:
 
 
 def crear_token_confirmacion_evento(slug: str, email: str) -> str:
-    """Enlace del mail de alta: confirma el evento e inicia sesion como su administrador."""
+    """Valida el correo de alta. Nunca concede una sesion administrativa."""
     return _firmar(
         {"tipo": "confirmar_evento", "slug": slug, "email": email.strip().lower()},
         MINUTOS_CONFIRMACION_EVENTO,
@@ -100,12 +108,42 @@ def obtener_usuario_actual(
     if credenciales is None:
         raise HTTPException(status_code=401, detail="Inicia sesion para continuar")
     datos = _leer(credenciales.credentials, "sesion")
-    usuario = db.get(User, int(datos["sub"]))
+    try:
+        usuario = db.get(User, int(datos["sub"]))
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(401, "Sesion invalida") from None
     if usuario is None or not usuario.activo:
         raise HTTPException(status_code=401, detail="Usuario inactivo")
     if datos.get("email") != usuario.email:
         raise HTTPException(status_code=401, detail="El email de la cuenta cambio. Inicia sesion nuevamente")
+    if (datos.get("amr") != "google" or not usuario.google_subject
+            or datos.get("google_sub") != usuario.google_subject or not usuario.email_validado_en):
+        raise HTTPException(401, "Inicia sesion con Google y un email verificado")
+    if not isinstance(datos.get("email_google"), str) or not datos["email_google"]:
+        raise HTTPException(401, "Sesion Google sin email verificado")
+    # Dato exclusivo de esta peticion; no modifica el email persistido de la cuenta.
+    usuario._email_google_sesion = datos["email_google"]
     return usuario
+
+
+def obtener_usuario_vinculacion_opcional(
+    credenciales: HTTPAuthorizationCredentials | None = Depends(esquema_bearer),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """La prueba de correo solo sirve para vincular Google, no para administrar."""
+    if credenciales is None:
+        return None
+    try:
+        return obtener_usuario_actual(credenciales, db)
+    except HTTPException:
+        try:
+            datos = _leer(credenciales.credentials, "validacion_email")
+            usuario = db.get(User, int(datos["sub"]))
+            if usuario and usuario.activo and usuario.email == datos.get("email") and usuario.email_validado_en:
+                return usuario
+        except (HTTPException, ValueError, TypeError, KeyError):
+            pass
+    return None
 
 
 def exigir_duenio_proveedor(db: Session, slug: str, usuario: User) -> Proveedor:

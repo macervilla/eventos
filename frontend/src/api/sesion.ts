@@ -2,6 +2,9 @@ const CLAVE_SESION = "eventos_sesion";
 export const EVENTO_SESION = "eventos:sesion";
 let memoria: string | null = null;
 const CLAVE_CUENTA = "eventos_cuenta_pestana";
+const CLAVE_VALIDACION = "eventos_validacion_email";
+export function guardarValidacionEmail(token: string) { try { sessionStorage.setItem(CLAVE_VALIDACION, token); } catch { /* Reabrir el enlace si el navegador no permite almacenar la validacion. */ } }
+export function obtenerValidacionEmail() { try { return sessionStorage.getItem(CLAVE_VALIDACION); } catch { return null; } }
 let activa: { base: string; token: string } | null = null;
 
 export function obtenerTokenSesion(): string | null {
@@ -26,6 +29,7 @@ export function guardarTokenSesion(token: string) {
   try {
     localStorage.setItem(CLAVE_SESION, token);
     sessionStorage.removeItem(CLAVE_CUENTA);
+    sessionStorage.removeItem(CLAVE_VALIDACION);
   } catch {
     // Sin almacenamiento disponible: la sesion dura solo mientras no se recargue.
   }
@@ -51,6 +55,7 @@ export function cerrarSesion() {
   try {
     localStorage.removeItem(CLAVE_SESION);
     sessionStorage.removeItem(CLAVE_CUENTA);
+    sessionStorage.removeItem(CLAVE_VALIDACION);
   } catch {
     // nada que limpiar
   }

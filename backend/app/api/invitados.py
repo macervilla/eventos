@@ -35,11 +35,13 @@ from app.schemas.invitados import (
     CorregirIngreso,
     Distribuir,
     Escaneo,
+    EntregaPin,
     InvitadoDatos,
     PortalAcceso,
     PortalRSVP,
     RegistrarIngreso,
 )
+from app.services import agasajados as ag
 from app.services import invitados as s
 from app.services.invitados_distribucion import distribuir
 from app.services.invitados_excel import excel, importar, preview
@@ -78,12 +80,21 @@ def descarga(
 @router.get("/{slug}/acceso")
 def mi_acceso(slug: str, db: Session = DB, usuario: User = USUARIO):
     ctx = acceso(db, slug, usuario, habilitado=False)
+    asignacion = db.scalar(select(MovimientoInvitacion).where(
+        MovimientoInvitacion.evento_id == ctx.evento.id,
+        MovimientoInvitacion.accion.in_(["asignacion_agasajado", "asignacion_rol"]),
+        MovimientoInvitacion.datos["usuario_destino"].as_integer() == usuario.id,
+        or_(MovimientoInvitacion.accion == "asignacion_agasajado",
+            MovimientoInvitacion.datos["rol"].as_string() == "AGASAJADO"),
+    ).order_by(MovimientoInvitacion.id.desc()).limit(1))
+    asignador = db.get(User, asignacion.actor_id) if asignacion and asignacion.actor_id else None
     return {
         "permisos": sorted(ctx.permisos),
         "solo_responsable": ctx.propio,
         "usuario_id": usuario.id,
         "config": s.configuracion(db, ctx.evento),
         "roles_disponibles": {k: sorted(v) for k, v in ALLOWED.items()},
+        "agasajado_asignado_por": (asignador.nombre or asignador.email) if asignador else None,
     }
 
 
@@ -100,6 +111,12 @@ def roles(slug: str, db: Session = DB, usuario: User = USUARIO):
         .join(User, EventoUsuario.usuario_id == User.id)
         .where(EventoUsuario.evento_id == ctx.evento.id)
     ).all()
+    avisos = {}
+    for aviso in db.scalars(select(MovimientoInvitacion).where(
+        MovimientoInvitacion.evento_id == ctx.evento.id,
+        MovimientoInvitacion.accion == "aviso_agasajado",
+    ).order_by(MovimientoInvitacion.id.desc())):
+        avisos.setdefault(aviso.datos.get("asignacion_id"), ag.resumen_aviso(aviso))
     return [
         {
             "id": a.id,
@@ -110,6 +127,7 @@ def roles(slug: str, db: Session = DB, usuario: User = USUARIO):
             if a.permisos is not None
             else sorted(DEFAULTS.get(a.rol.value, set())),
             "solo_responsable": a.solo_responsable,
+            "aviso": avisos.get(a.id),
         }
         for a, email in filas
     ]
@@ -132,6 +150,11 @@ def asignar(slug: str, data: AsignacionRol, db: Session = DB, usuario: User = US
         rol = EventoUsuario(evento_id=ctx.evento.id, usuario_id=persona.id, rol=RolEvento(data.rol))
         db.add(rol)
     rol.permisos, rol.solo_responsable = data.permisos, data.solo_responsable
+    aviso = None
+    if rol.rol in {RolEvento.AGASAJADO, RolEvento.ADMIN_EVENTO}:
+        rol.usuario = persona
+        db.flush()
+        aviso = ag.preparar_aviso(db, ctx, rol, data.permisos != [])
     s.auditar(
         db,
         ctx.evento.id,
@@ -142,7 +165,7 @@ def asignar(slug: str, data: AsignacionRol, db: Session = DB, usuario: User = US
         permisos=data.permisos,
     )
     db.commit()
-    return {"id": rol.id}
+    return {"id": rol.id, "avisos": [ag.enviar_aviso(db, aviso)] if aviso else []}
 
 
 @router.post("/{slug}/agasajados")
@@ -151,6 +174,8 @@ def asignar_agasajados(
 ):
     ctx = acceso(db, slug, usuario, "roles", False)
     resultado = []
+    avisos = []
+    contactos = {str(c.email).lower(): c.model_dump(mode="json") for c in data.contactos}
     for email in dict.fromkeys(str(e).strip().lower() for e in data.emails):
         persona = get_or_create_user(db, email, "")
         if not persona.activo:
@@ -171,12 +196,15 @@ def asignar_agasajados(
             )
             db.add(asignacion)
         if asignacion.permisos is not None:
-            asignacion.permisos = sorted(set(asignacion.permisos) | {"ver_invitados", "distribuir"})
+            asignacion.permisos = sorted(set(asignacion.permisos) | {"ver_invitados", "editar_invitados", "distribuir"})
         asignacion.solo_responsable = data.solo_responsable
+        asignacion.usuario = persona
+        db.flush()
+        avisos.append(ag.preparar_aviso(db, ctx, asignacion, True, contactos.get(email)))
         s.auditar(db, ctx.evento.id, "asignacion_agasajado", usuario.id, usuario_destino=persona.id)
         resultado.append({"email": persona.email, "usuario_id": persona.id})
     db.commit()
-    return {"agasajados": resultado}
+    return {"agasajados": resultado, "avisos": [ag.enviar_aviso(db, aviso) for aviso in avisos]}
 
 
 @router.post("/{slug}/roles/{rol_id}/revocar")
@@ -190,9 +218,28 @@ def revocar_rol(slug: str, rol_id: int, db: Session = DB, usuario: User = USUARI
     if rol is None or rol.rol in {RolEvento.PROPIETARIO, RolEvento.ENCARGADO}:
         raise HTTPException(409, "Asignacion no revocable desde este modulo")
     rol.permisos = []
+    aviso = ag.preparar_aviso(db, ctx, rol, False) if rol.rol in {RolEvento.AGASAJADO, RolEvento.ADMIN_EVENTO} else None
     s.auditar(db, ctx.evento.id, "revocacion_rol", usuario.id, asignacion=rol.id)
     db.commit()
-    return {"message": "Permisos revocados"}
+    return {"message": "Permisos del rol revocados", "avisos": [ag.enviar_aviso(db, aviso)] if aviso else []}
+
+
+@router.post("/{slug}/avisos-agasajados/{aviso_id}/reintentar")
+def reintentar_aviso(slug: str, aviso_id: int, db: Session = DB, usuario: User = USUARIO):
+    ctx = acceso(db, slug, usuario, "roles", False)
+    aviso = db.scalar(select(MovimientoInvitacion).where(
+        MovimientoInvitacion.id == aviso_id,
+        MovimientoInvitacion.evento_id == ctx.evento.id,
+        MovimientoInvitacion.accion == "aviso_agasajado",
+    ).with_for_update())
+    if aviso is None:
+        raise HTTPException(404, "Aviso no encontrado")
+    ultimo = ag.ultimo_aviso(db, ctx.evento.id, aviso.datos["asignacion_id"])
+    if ultimo.id != aviso.id:
+        raise HTTPException(409, "Existe un aviso mas reciente para esta asignacion")
+    if aviso.datos["estado"] == "ENVIADO":
+        return {"avisos": [ag.resumen_aviso(aviso)]}
+    return {"avisos": [ag.enviar_aviso(db, aviso)]}
 
 
 def filtrar(
@@ -285,9 +332,14 @@ def listar(
         .offset(offset)
         .limit(limit)
     ).all()
+    creadores_ids = {inv.creado_por for inv in items if inv.creado_por}
+    creadores = {u.id: u.nombre or u.email for u in db.scalars(
+        select(User).where(User.id.in_(creadores_ids))
+    )} if "ver_invitados" in ctx.permisos else {}
     return {
         "total": total,
-        "items": [s.resumen_inv(inv, "ver_invitados" in ctx.permisos) for inv in items],
+        "items": [{**s.resumen_inv(inv, "ver_invitados" in ctx.permisos),
+                   "agregado_por": creadores.get(inv.creado_por)} for inv in items],
     }
 
 
@@ -297,6 +349,19 @@ def crear(slug: str, data: InvitadoDatos, db: Session = DB, usuario: User = USUA
     inv = s.guardar_invitado(db, ctx, data)
     db.commit()
     return s.resumen_inv(inv)
+
+
+@router.post("/{slug}/lista/{inv_id}/pin-personal")
+def generar_pin_personal(slug: str, inv_id: int, data: EntregaPin, response: Response, db: Session = DB, usuario: User = USUARIO):
+    import secrets
+    ctx = acceso(db, slug, usuario, "editar_invitados")
+    inv = s.obtener(db, ctx, inv_id, True)
+    pin = f"{secrets.randbelow(10**10):010d}"
+    inv.pin_personal_hash = s.digest(f"pin-personal:{ctx.evento.id}:{inv.id}:{pin}")
+    s.auditar(db, ctx.evento.id, "pin_personal_generado", usuario.id, inv.id, canal_entrega=data.canal)
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return {"pin": pin, "message": "Se muestra una sola vez. Entregalo personalmente o por un canal distinto al enlace de invitacion. No lo incluyas en la tarjeta ni en el mismo mensaje."}
 
 
 @router.put("/{slug}/lista/{inv_id}")

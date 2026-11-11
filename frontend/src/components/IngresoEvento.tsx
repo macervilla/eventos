@@ -2,7 +2,7 @@ import axios from "axios";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import { guardarTokenSesion } from "../api/sesion";
+import { guardarTokenSesion, obtenerValidacionEmail } from "../api/sesion";
 import { GoogleSignIn } from "./GoogleSignIn";
 import { Ventana } from "./Ventana";
 
@@ -12,7 +12,8 @@ export function IngresoEvento({ slug, alIngresar, alCerrar }: { slug: string; al
   async function ingresar(credential: string) {
     setError(null); setCargando(true);
     try {
-      const { data } = await api.post<{ token: string | null }>("/acceso/google", { credential });
+      const validacionEmail = obtenerValidacionEmail();
+      const { data } = await api.post<{ token: string | null }>("/acceso/google", { credential }, validacionEmail ? { headers: { Authorization: `Bearer ${validacionEmail}` } } : undefined);
       if (!data.token) throw new Error("Esta cuenta esta inactiva. Contacta al administrador del proyecto.");
       guardarTokenSesion(data.token);
       alIngresar();

@@ -3,18 +3,19 @@ import { CSSProperties, ChangeEvent, useCallback, useEffect, useRef, useState } 
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import { GaleriaEvento } from "../components/GaleriaEvento";
-import { MenuDesplegable } from "../components/MenuDesplegable";
+import { useMenuSesion } from "../components/MenuSesionContext";
 import { TextosPortadaEvento } from "../components/TextosPortada";
 import { IngresoEvento } from "../components/IngresoEvento";
 import { Ventana } from "../components/Ventana";
 import { api } from "../api/client";
-import { cerrarSesion, guardarTokenSesion, obtenerTokenSesion } from "../api/sesion";
+import { cerrarSesion, guardarValidacionEmail, obtenerTokenSesion } from "../api/sesion";
 import { Evento, VentanaDatosEvento, VentanaSalonEvento, VentanaGaleriaEvento } from "../components/EdicionEvento";
 import { mensajeDeError, urlMapaEmbebido } from "../components/EdicionProveedor";
 import { CapasPortada, EncuadrePortada, useAjusteEncuadre } from "../components/PortadaAjustable";
 import { leerImagenDelPortapapeles, prepararImagen, usePegarImagen } from "../components/pegarImagen";
 import { estiloTipografia, useFuentesGoogle } from "../data/tipografias";
 import { eventTemplates, EventTemplateKey } from "../templates/visualTemplates";
+import { InvitadosPage } from "./InvitadosPage";
 
 type PermisosEvento = {
   permisos_invitados: string[];
@@ -40,6 +41,7 @@ function formatearFecha(iso: string) {
 
 export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => void } = {}) {
   const { slug } = useParams();
+  const { actualizarAccionesEvento, actualizarAlCerrarSesion } = useMenuSesion();
   const [searchParams, setSearchParams] = useSearchParams();
   const confirmacionProcesada = useRef(false);
   const selectorPortada = useRef<HTMLInputElement>(null);
@@ -50,7 +52,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
   const [usuario, setUsuario] = useState<PermisosEvento['usuario']>(null);
   const [rol, setRol] = useState("visitante");
   const [permisosInvitados, setPermisosInvitados] = useState<string[]>([]);
-  const [editando, setEditando] = useState(false);
+  const [editando, setEditando] = useState(() => searchParams.get("editar") === "1");
   const [ingresoAbierto, setIngresoAbierto] = useState(false);
   const [imagenPendiente, setImagenPendiente] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -97,8 +99,8 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
     api
       .post<{ slug: string; token: string }>("/eventos/confirmar", { token })
       .then((response) => {
-        guardarTokenSesion(response.data.token);
-        setAviso("Evento confirmado. Ya podes administrarlo desde esta pagina.");
+        guardarValidacionEmail(response.data.token);
+        setAviso("Email validado. Inicia sesion con Google para revisar y publicar el evento.");
       })
       .catch(() => setAvisoError("El enlace de confirmacion vencio o no es valido."))
       .finally(() => {
@@ -107,20 +109,14 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
       });
   }, [searchParams, setSearchParams, cargar]);
 
-  useEffect(() => {
-    if (evento && window.location.hash === "#mi-confirmacion") {
-      document.getElementById("mi-confirmacion")?.scrollIntoView({ block: "start" });
-    }
-  }, [evento]);
-
-  const salir = () => {
+  const salir = useCallback(() => {
     cerrarSesion();
     alCambiarSesion?.();
     setEsAdministrador(false);
     setEditando(false);
     setVentanaAbierta(null);
     cargar();
-  };
+  }, [alCambiarSesion, cargar]);
 
   const alGuardar = (actualizado: Evento) => {
     setEvento(actualizado);
@@ -198,25 +194,32 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
     setDestinoImagen({ tipo, id });
     selectorPortada.current?.click();
   };
-  const acceso = <div className="evento-acceso" aria-label="Acceso al evento">
-    {haySesion && usuario ? <MenuDesplegable etiqueta="Menu del evento">
-    {esAdministrador && evento && !evento.confirmado && <button className="action-button" type="button" onClick={() => {
-      api.post<Evento>(`/eventos/${slug}/publicar`).then(r => { setEvento(r.data); setAviso("Evento publicado."); })
-        .catch(err => setAvisoError(mensajeDeError(err)));
-    }}>Publicar evento</button>}
-      <span className="evento-usuario">{usuario.email}<small>{rol === "visitante" ? "Visitante - sin permisos de edicion" : rol}</small></span>
-      {esAdministrador && <button className="secondary-button" onClick={() => { setEditando(!editando); setAviso(null); }}>{editando ? "Ver invitacion" : "Editar evento"}</button>}
-      {permisosInvitados.some(p => ["ver_invitados", "configurar_invitados", "roles", "estadisticas"].includes(p)) && <Link className="secondary-button" to={`/e/${slug}/invitados`}>Gestion de invitados</Link>}
-      {permisosInvitados.includes("control_ingreso") && <Link className="secondary-button" to={`/e/${slug}/control-ingreso`}>Control de ingreso</Link>}
-      <button className="secondary-button" onClick={salir}>Salir</button>
-    </MenuDesplegable> : <button className="secondary-button" onClick={() => setIngresoAbierto(true)}>Ingresar</button>}
-  </div>;
+  useEffect(() => {
+    const tieneEvento = Boolean(evento);
+    actualizarAccionesEvento(<>
+      {haySesion && usuario ? <>
+        {esAdministrador && tieneEvento && !evento?.confirmado && <button className="action-button" type="button" onClick={() => {
+          api.post<Evento>(`/eventos/${slug}/publicar`).then(r => { setEvento(r.data); setAviso("Evento publicado."); })
+            .catch(err => setAvisoError(mensajeDeError(err)));
+        }}>Publicar evento</button>}
+        <span className="evento-usuario">{usuario.email}<small>{rol === "visitante" ? "Visitante - sin permisos de edicion" : rol}</small></span>
+        {esAdministrador && <button className="secondary-button" onClick={() => { setEditando(!editando); setAviso(null); }}>{editando ? "Ver invitacion" : "Editar evento"}</button>}
+        {permisosInvitados.some(p => ["ver_invitados", "configurar_invitados", "roles", "estadisticas"].includes(p)) && <Link className="secondary-button" to={`/e/${slug}/invitados`}>Gestion de invitados</Link>}
+        {permisosInvitados.includes("control_ingreso") && <Link className="secondary-button" to={`/e/${slug}/control-ingreso`}>Control de ingreso</Link>}
+      </> : <button className="secondary-button" onClick={() => setIngresoAbierto(true)}>Ingresar al evento</button>}
+    </>);
+    actualizarAlCerrarSesion(salir);
+    return () => {
+      actualizarAccionesEvento(null);
+      actualizarAlCerrarSesion(null);
+    };
+  }, [actualizarAccionesEvento, actualizarAlCerrarSesion, editando, evento, esAdministrador, haySesion, permisosInvitados, rol, salir, slug, usuario]);
   const ingreso = ingresoAbierto && slug && <IngresoEvento slug={slug} alCerrar={() => setIngresoAbierto(false)} alIngresar={() => { setIngresoAbierto(false); alCambiarSesion?.(); void cargar(); }} />;
 
   if (error) {
     return (
       <main className="providers-page">
-        {acceso}{ingreso}
+        {ingreso}
         {avisoError && <div className="empty-state error">{avisoError}</div>}
         <div className="empty-state error">{error}</div>
       </main>
@@ -257,17 +260,12 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
       className={`provider-public evento-personalizado con-tipografia ${template.className}`}
       style={{ ...estiloTipografia(evento.tipografia), "--evento-fondo": evento.colores.fondo, "--evento-texto": evento.colores.texto, "--evento-acento": evento.colores.acento } as CSSProperties}
     >
-      {acceso}{ingreso}
+      {ingreso}
       {editando && <p className="evento-modo-edicion" role="status">Modo edicion. Usa los controles para editar. Doble clic en una imagen para cambiarla.</p>}
       <input ref={selectorPortada} accept="image/jpeg,image/png,image/webp" hidden type="file" onChange={cambiarPortada} />
       <div ref={setControlesTextos} />
       <section className="provider-cover" onDoubleClick={e => { if (esAdministrador && editando && !(e.target as HTMLElement).closest("button, a, nav, .texto-portada, .textos-portada-controles")) elegirImagen("PORTADA"); }}>
         <CapasPortada imagen={portada} encuadre={ajuste.encuadreVisible} />
-        {esAdministrador && (
-          <nav className="public-nav overlay-nav">
-            <Link to="/proveedores">Buscar proveedores</Link>
-          </nav>
-        )}
         <TextosPortadaEvento key={`${slug}-${editando}-${ajuste.editando}`} configuracion={evento.textos_portada}
           colores={evento.colores_textos}
           contenedorControles={controlesTextos}
@@ -407,6 +405,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
         {esAdministrador && editando && <><p>{evento.galeria.length} de {evento.limite_galeria} imagenes.</p><button className="secondary-button" disabled={evento.galeria.length >= evento.limite_galeria} onClick={() => elegirImagen("GALERIA")}>Agregar imagen</button></>}
       </section>}
       {ventanaAbierta === "galeria" && <VentanaGaleriaEvento evento={evento} alGuardar={alGuardar} alCerrar={() => setVentanaAbierta(null)} />}
+      {haySesion && !esAdministrador && permisosInvitados.includes("ver_invitados") && <InvitadosPage key={slug} integrado />}
       {imagenPendiente && <Ventana titulo="Cambiar imagen" alCerrar={() => { if (!subiendoPortada) setImagenPendiente(null); }}>
         {preview && <img className="evento-imagen-preview" src={preview} alt="Vista previa de la nueva imagen" />}
         {avisoError && <p className="form-error" role="alert">{avisoError}</p>}

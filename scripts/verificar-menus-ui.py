@@ -1,6 +1,7 @@
-"""Menus de cuenta y evento con API simulada, sin modificar cuentas reales."""
+"""Menu unificado de cuenta y evento con API simulada, sin modificar cuentas reales."""
 import json
 import os
+import re
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -23,6 +24,8 @@ def main():
         elif url.endswith("/permisos"):
             data = dict(puede_editar=True, usuario=dict(id=1, email="administrador@example.com"),
                         rol="administrador", permisos_invitados=["ver_invitados", "control_ingreso"])
+        elif "/proveedores" in url or "/categorias" in url:
+            data = []
         else:
             data = evento
         route.fulfill(status=200, content_type="application/json", body=json.dumps(data))
@@ -36,24 +39,24 @@ def main():
             context.route("http://localhost:8009/**", api)
             page = context.new_page()
             page.goto(os.getenv("EVENTOS_UI_URL", "http://localhost:5179") + "/e/prueba", wait_until="domcontentloaded")
-            cuenta = page.get_by_role("button", name="Mi cuenta", exact=True)
-            opciones = page.get_by_role("button", name="Menu del evento", exact=True)
-            expect(opciones).to_be_visible()
+            cuenta = page.get_by_role("button", name="Menú", exact=True)
+            opciones = cuenta
+            expect(cuenta).to_be_visible()
+            expect(page.locator(".barra-sesion button[aria-expanded]")).to_have_count(1)
+            expect(page.get_by_role("button", name="Menu del evento", exact=True)).to_have_count(0)
+            expect(page.get_by_role("link", name="Buscar proveedores", exact=True)).to_have_count(0)
             expect(cuenta).to_have_attribute("aria-expanded", "false")
             expect(page.get_by_role("button", name="Editar evento", exact=True)).to_have_count(0)
             expect(page.get_by_role("link", name="Mis sitios", exact=True)).to_have_count(0)
             expect(page.get_by_text("administrador@example.com", exact=True)).to_have_count(0)
             cuenta.click()
             expect(page.get_by_role("link", name="Mis sitios", exact=True)).to_be_visible()
-            expect(page.get_by_role("link", name="Dashboard", exact=True)).to_be_visible()
-            expect(page.get_by_text("administrador@example.com", exact=True)).to_be_visible()
-            cuenta.click()
-            opciones.click()
-            cuenta.click()
-            expect(opciones).to_have_attribute("aria-expanded", "false")
-            cuenta.click()
-            opciones.click()
-            expect(cuenta).to_have_attribute("aria-expanded", "false")
+            expect(page.get_by_role("link", name="Dashboard", exact=True)).to_have_count(0)
+            expect(page.locator(".barra-email")).to_have_count(0)
+            expect(page.locator(".evento-usuario")).to_have_count(1)
+            expect(page.locator(".evento-usuario")).to_contain_text("administrador@example.com")
+            expect(page.locator(".menu-desplegable-panel > :last-child")).to_have_text("Cerrar sesion")
+            expect(page.get_by_role("link", name="Buscar proveedores", exact=True)).to_be_visible()
             expect(page.get_by_role("button", name="Editar evento", exact=True)).to_be_visible()
             expect(page.get_by_role("link", name="Gestion de invitados", exact=True)).to_be_visible()
             expect(page.get_by_role("link", name="Control de ingreso", exact=True)).to_be_visible()
@@ -74,11 +77,21 @@ def main():
             page.screenshot(path=str(Path(os.environ.get("TEMP", "/tmp")) / f"eventos-menu-cerrado-{ancho}.png"))
             cuenta.click()
             page.get_by_role("button", name="Cerrar sesion", exact=True).click()
-            expect(cuenta).to_have_count(0)
-            expect(page.get_by_role("navigation", name="Sesion de Eventos").get_by_role("link", name="Ingresar", exact=True)).to_be_visible()
+            expect(cuenta).to_be_visible()
+            cuenta.click()
+            expect(page.get_by_role("link", name="Ingresar a mi cuenta", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="Ingresar al evento", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="Editar evento", exact=True)).to_have_count(0)
+            expect(page.get_by_role("link", name="Mis sitios", exact=True)).to_have_count(0)
+            page.get_by_role("link", name="Buscar proveedores", exact=True).click()
+            expect(page).to_have_url(re.compile(r"/proveedores$"))
+            expect(cuenta).to_have_attribute("aria-expanded", "false")
+            cuenta.click()
+            expect(page.get_by_role("button", name="Ingresar al evento", exact=True)).to_have_count(0)
+            expect(page.get_by_role("link", name="Buscar proveedores", exact=True)).to_be_visible()
             context.close()
         browser.close()
-    print("OK: menus ocultos por defecto, cuenta y permisos, cierre exterior/Escape/acciones, edicion y logout; movil y escritorio.")
+    print("OK: menu unico, proveedores, permisos, cierre exterior/Escape/acciones, edicion, logout y navegacion; movil y escritorio.")
 
 
 if __name__ == "__main__":

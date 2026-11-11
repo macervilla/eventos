@@ -1990,6 +1990,16 @@ textarea {
 .admin-user-form .admin-actions > button { width: auto; }
 .admin-user-form p { margin: 0; color: #52665e; font-size: 14px; line-height: 1.6; }
 .admin-user-form p.form-error { color: #b91c1c; }
+.admin-event-users { display: grid; gap: 16px; }
+.admin-event-users > p { margin: 0; }
+.admin-event-users h3 { margin: 8px 0 0; }
+.admin-assigned-users { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; }
+.admin-assigned-users li { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid #d7e3df; border-radius: 10px; padding: 12px; }
+.admin-assigned-users li > div { min-width: 0; overflow-wrap: anywhere; }
+.admin-assigned-users small { display: block; margin-top: 4px; }
+.admin-assigned-users button { flex: 0 0 auto; width: auto; }
+.admin-account-select { display: grid; gap: 8px; }
+.admin-event-users select { width: 100%; min-width: 0; }
 .admin-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .admin-kpis article { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; background: white; border: 1px solid var(--admin-border); border-radius: 18px; padding: 24px; box-shadow: 0 8px 24px #173a2c06; }
 .admin-kpis article > svg { color: #277553; background: #e9f4ed; box-sizing: content-box; padding: 10px; border-radius: 12px; margin-bottom: 7px; }
@@ -2025,7 +2035,6 @@ textarea {
 .evento-personalizado .enlace-maps { color: var(--evento-acento); }
 .evento-personalizado .contact-grid a, .evento-personalizado .contact-grid span, .evento-personalizado .provider-side p { color: var(--evento-texto); }
 .evento-personalizado .provider-public-content > :only-child { grid-column: 1 / -1; }
-.evento-acceso { position: relative; z-index: 20; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; padding: 8px 12px; background: #fff; }
 .evento-usuario { background: #fff; color: #18212f; padding: 8px 12px; border-radius: 10px; font-size: 13px; overflow-wrap: anywhere; }
 .evento-usuario small { display: block; margin-top: 3px; color: #52665e; }
 .evento-modo-edicion { padding: 16px 24px; margin: 0; background: #eaf4ec; color: #204d37; }
@@ -2038,7 +2047,7 @@ textarea {
 .evento-galeria figure { margin: 0; }
 .evento-galeria img { width: 100%; height: 260px; object-fit: cover; border-radius: 16px; }
 .evento-imagen-preview { display: block; max-height: 50vh; max-width: 100%; margin: 20px auto; object-fit: contain; }
-@media (max-width: 600px) { .evento-acceso { gap: 6px; } .evento-usuario { max-width: 185px; } .evento-acceso .secondary-button { padding: 8px 10px; font-size: 12px; } }
+@media (max-width: 600px) { .evento-usuario { max-width: 185px; } }
 .evento-galeria > .galeria-presentacion { display: block; }
 .evento-galeria .galeria-laminas { display: grid; grid-template-columns: repeat(var(--galeria-columnas), minmax(0, 1fr)); gap: 18px; }
 .evento-galeria .galeria-laminas figure { min-width: 0; }
@@ -2168,6 +2177,15 @@ textarea {
 .paleta-muestras button[aria-pressed="true"] { outline: 2px solid #245c48; outline-offset: 2px; }
 .paleta-vista-previa { background: #334155; border-radius: 8px; padding: 10px; overflow-wrap: anywhere; }
 .menu-desplegable { position: relative; }
+.agasajado-contacto { min-width: 0; border: 1px solid #dce6e1; border-radius: 10px; padding: 12px; }
+.agasajado-contacto legend { overflow-wrap: anywhere; }
+.agasajado-asignado { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 6px 8px 6px 12px; border-radius: 24px; background: #e8f4eb; color: #245c48; }
+.agasajado-asignado > span { min-width: 0; padding: 0; background: transparent; }
+.agasajado-asignado .agasajado-quitar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #245c48; cursor: pointer; }
+.agasajado-asignado .agasajado-quitar:hover { background: #cfe5d5; }
+.agasajado-asignado .agasajado-quitar:focus-visible { outline: 2px solid #245c48; outline-offset: 2px; }
+.agasajado-aviso { border-bottom: 1px solid #dce6e1; padding: 16px 0; overflow-wrap: anywhere; }
+.mensaje-agasajado { white-space: pre-wrap; }
 .menu-desplegable-panel {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 30;
   width: 270px; max-width: calc(100vw - 32px); max-height: min(70vh, 520px); overflow-y: auto;

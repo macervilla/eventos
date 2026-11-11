@@ -23,7 +23,7 @@ def main():
         elif request.url.endswith("/google"):
             data = sesion("cuenta-1")
         elif request.url.endswith("/enlace"):
-            data = sesion("inicial", False)
+            data = dict(email="persona@gmail.com", token="inicial", email_validado=True, google_vinculado=False, requiere_google=True, opciones=[])
         elif request.url.endswith("/yo"):
             data = sesion(request.headers.get("authorization", "").removeprefix("Bearer "))
         elif "/administracion/resumen" in request.url:
@@ -51,18 +51,18 @@ def main():
         base = os.getenv("EVENTOS_UI_URL", "http://localhost:5179")
         page.goto(base + "/ingresar")
         nav = page.get_by_role("navigation", name="Sesion de Eventos")
-        expect(nav.get_by_role("link",name="Ingresar",exact=True)).to_be_visible()
+        expect(nav.get_by_role("button",name="Men\u00fa",exact=True)).to_be_visible()
         expect(page.get_by_role("button",name="Recuperar acceso")).not_to_be_visible()
         page.get_by_role("button",name="Seleccionar cuenta de prueba").click()
         expect(page.get_by_role("heading",name="Elegir apartado")).to_be_visible()
         page.get_by_role("button",name="Mi salon Proveedor").click()
         expect(page).to_have_url(base + "/proveedores")
         assert page.evaluate("JSON.parse(sessionStorage.getItem('eventos_cuenta_pestana')).token") == "cuenta-2"
-        nav.get_by_role("button",name="Mi cuenta",exact=True).click()
+        nav.get_by_role("button",name="Men\u00fa",exact=True).click()
         expect(nav.get_by_role("button",name="Cerrar sesion")).to_be_visible()
         segunda = context.new_page()
         segunda.goto(base + "/proveedores")
-        segunda.get_by_role("button",name="Mi cuenta",exact=True).click()
+        segunda.get_by_role("button",name="Men\u00fa",exact=True).click()
         expect(segunda.get_by_role("button",name="Cerrar sesion")).to_be_visible()
         segunda.goto(base + "/administracion")
         expect(segunda.get_by_role("heading",name="El proyecto, en numeros")).to_be_visible()
@@ -70,13 +70,16 @@ def main():
         assert segunda.evaluate("JSON.parse(sessionStorage.getItem('eventos_cuenta_pestana')).token") == "cuenta-1"
         assert page.evaluate("JSON.parse(sessionStorage.getItem('eventos_cuenta_pestana')).token") == "cuenta-2"
         nav.get_by_role("button",name="Cerrar sesion").click()
-        expect(nav.get_by_role("link",name="Ingresar",exact=True)).to_be_visible()
-        expect(segunda.get_by_role("navigation",name="Sesion de Eventos").get_by_role("link",name="Ingresar",exact=True)).to_be_visible()
+        expect(nav.get_by_role("button",name="Men\u00fa",exact=True)).to_be_visible()
+        expect(segunda.get_by_role("navigation",name="Sesion de Eventos").get_by_role("button",name="Men\u00fa",exact=True)).to_be_visible()
         assert page.evaluate("window._salioDeEventos") is True
         assert page.evaluate("localStorage.getItem('eventos_sesion')") is None
         page.goto(base + "/ingresar?enlace=bienvenida&destino=%2Fproveedores")
         expect(page.get_by_role("status").filter(has_text="Email validado")).to_be_visible()
         assert "enlace=" not in page.url
+        assert page.evaluate("localStorage.getItem('eventos_sesion')") is None
+        assert page.evaluate("sessionStorage.getItem('eventos_validacion_email')") == 'inicial'
+        expect(page.get_by_role("heading", name="Elegir apartado")).to_have_count(0)
         page.get_by_role("button",name="Seleccionar cuenta de prueba").click()
         expect(page).to_have_url(base + "/proveedores")
         assert any(url.endswith("/google") and authorization == "Bearer inicial" for _,url,authorization in solicitudes)
@@ -84,7 +87,7 @@ def main():
         page.set_viewport_size({"width":390,"height":844})
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         page.screenshot(path=str(Path(os.environ.get("TEMP","/tmp")) / "eventos-sesion-movil.png"),full_page=True)
-        page.get_by_role("button",name="Mi cuenta",exact=True).click()
+        page.get_by_role("button",name="Men\u00fa",exact=True).click()
         page.get_by_role("button",name="Cerrar sesion").click()
         page.goto(base + "/eventos/nuevo")
         expect(page.get_by_role("navigation",name="Sesion de Eventos")).to_be_visible()

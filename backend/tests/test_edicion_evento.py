@@ -9,7 +9,7 @@ def png_valido():
 import pytest
 from sqlalchemy import select
 
-from app.core.seguridad import crear_token_sesion
+from tests.autenticacion import token_google
 from app.models.enums import RolEvento, MediaTipo, Plan
 from app.models.eventos import Evento, EventoUsuario
 from app.models.interacciones import Media
@@ -20,7 +20,7 @@ pytest_plugins = ["tests.test_administracion", "tests.test_google_oauth"]
 
 
 def auth(usuario):
-    return {"Authorization": f"Bearer {crear_token_sesion(usuario)}"}
+    return {"Authorization": f"Bearer {token_google(usuario)}"}
 
 
 def datos(**cambios):

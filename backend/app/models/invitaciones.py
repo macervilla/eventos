@@ -38,6 +38,7 @@ class Invitacion(TimestampMixin, Base):
     grupo: Mapped[str | None] = mapped_column(String(160), index=True)
     responsable_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
     creado_por: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    pin_personal_hash: Mapped[str | None] = mapped_column(String(64))
     actualizado_por: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     clave_duplicado: Mapped[str | None] = mapped_column(String(64))
     adultos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -93,6 +94,8 @@ class ValidacionInvitado(TimestampMixin, Base):
     vence_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     intentos: Mapped[int] = mapped_column(Integer, default=0)
     usado: Mapped[bool] = mapped_column(Boolean, default=False)
+    metodo: Mapped[str] = mapped_column(String(20), default="email", server_default="email")
+    proveedor_referencia: Mapped[str | None] = mapped_column(String(64))
 
 
 class SolicitudRSVP(TimestampMixin, Base):

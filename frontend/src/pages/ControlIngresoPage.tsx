@@ -1,3 +1,4 @@
+import { Ventana } from "../components/Ventana";
 import axios from "axios";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -7,6 +8,11 @@ import type { IScannerControls } from "@zxing/browser";
 
 export function ControlIngresoPage() {
   const { slug } = useParams(); const navigate = useNavigate(); const base = `/invitados/${slug}`;
+  const [correccion, setCorreccion] = useState<Invitado | null>(null);
+  const [cantidadCorreccion, setCantidadCorreccion] = useState(1);
+  const [motivoCorreccion, setMotivoCorreccion] = useState("");
+  const [errorCorreccion, setErrorCorreccion] = useState<string | null>(null);
+  const [corrigiendo, setCorrigiendo] = useState(false);
   const [permitido, setPermitido] = useState(false); const [puedeCorregir, setPuedeCorregir] = useState(false);
   const [token, setToken] = useState(""); const [invitado, setInvitado] = useState<Invitado | null>(null);
   const [cantidad, setCantidad] = useState(1); const [ocupado, setOcupado] = useState(false);
@@ -86,10 +92,28 @@ export function ControlIngresoPage() {
       </section>}
       <section className="invitados-panel"><h2>Busqueda de contingencia</h2><p>La busqueda permite consultar la invitacion. No registra ingresos ni reemplaza la validacion de una credencial aprobada.</p><form className="invitados-acciones" onSubmit={e => { e.preventDefault(); void api.get(base + "/control/buscar", { params: { q } }).then(r => setBusqueda(r.data.items)).catch(err => setError(errorMensaje(err))); }}><input value={q} onChange={e => setQ(e.target.value)} placeholder="Nombre o grupo" aria-label="Buscar invitado" /><button className="secondary-button">Buscar</button></form>
         {busqueda.map(i => <article key={i.id}><strong>{i.nombre} {i.apellido} · {i.grupo}</strong><p>{i.aprobacion}. Aprobados: {i.cupo_aprobado}. Ingresaron: {i.ingresados}. Restan: {i.restantes}.</p>
-          {puedeCorregir && i.ingresados > 0 && <button className="secondary-button" onClick={() => { const cantidad = Number(window.prompt("Cantidad de ingresos a descontar")); const motivo = window.prompt("Motivo de la correccion (queda auditado)"); if (cantidad > 0 && motivo) void api.post(`${base}/control/${i.id}/corregir`, { cantidad, motivo, idempotencia: crypto.randomUUID() }).then(() => { setAviso("Correccion auditada."); void actualizar(); setBusqueda([]); }).catch(err => setError(errorMensaje(err))); }}>Corregir ingresos</button>}
+          {puedeCorregir && i.ingresados > 0 && <button className="secondary-button" onClick={() => { setCorreccion(i); setCantidadCorreccion(1); setMotivoCorreccion(""); setErrorCorreccion(null); }}>Corregir ingresos</button>}
         </article>)}
       </section>
       <section className="invitados-panel"><h2>Ultimos movimientos</h2><p>Actualizacion cada 15 segundos mientras esta pantalla esta visible.</p>{movimientos.map(m => <p key={m.id}>{new Date(m.fecha).toLocaleString("es-AR")} · {m.nombre} · {m.cantidad > 0 ? "+" : ""}{m.cantidad} · {m.operador}</p>)}</section>
     </>}
+    {correccion && <Ventana titulo={`Corregir ingresos de ${correccion.nombre}`} alCerrar={() => { if (!corrigiendo) setCorreccion(null); }}>
+      <form className="invitados-form" onSubmit={async e => {
+        e.preventDefault();
+        if (corrigiendo || !Number.isInteger(cantidadCorreccion) || cantidadCorreccion < 1 || cantidadCorreccion > correccion.ingresados || !motivoCorreccion.trim()) return;
+        setCorrigiendo(true); setErrorCorreccion(null);
+        try {
+          await api.post(`${base}/control/${correccion.id}/corregir`, { cantidad: cantidadCorreccion, motivo: motivoCorreccion.trim(), idempotencia: crypto.randomUUID() });
+          setCorreccion(null); setAviso("Correccion auditada."); await actualizar(); setBusqueda([]);
+        } catch (err) { setErrorCorreccion(errorMensaje(err)); }
+        finally { setCorrigiendo(false); }
+      }}>
+        <p>Se descontaran ingresos registrados. El motivo quedara guardado en la auditoria.</p>
+        <label>Cantidad a descontar<input autoFocus required type="number" min={1} max={correccion.ingresados} step={1} value={cantidadCorreccion} onChange={e => setCantidadCorreccion(Number(e.target.value))} /></label>
+        <label>Motivo de la correccion<textarea required value={motivoCorreccion} onChange={e => setMotivoCorreccion(e.target.value)} /></label>
+        {errorCorreccion && <p role="alert" className="form-error">{errorCorreccion}</p>}
+        <div className="form-actions"><button className="secondary-button" type="button" disabled={corrigiendo} onClick={() => setCorreccion(null)}>Cancelar</button><button className="action-button" disabled={corrigiendo || !motivoCorreccion.trim()}>Confirmar correccion</button></div>
+      </form>
+    </Ventana>}
   </main>;
 }

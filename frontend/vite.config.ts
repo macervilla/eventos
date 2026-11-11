@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-const apiVps = process.env.VPS_API_TARGET;
+const apiVps = process.env.VPS_API_TARGET ?? "https://acersistemas.site/eventos/api";
 
 function compartirHtml(dev: boolean, transformar?: (url: string, html: string) => Promise<string>) {
   return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
@@ -10,7 +10,7 @@ function compartirHtml(dev: boolean, transformar?: (url: string, html: string) =
     const match = ruta.match(/^\/e\/([a-z0-9-]+)(?:\/i\/[A-Za-z0-9_-]+)?\/?$/);
     if (req.method !== "GET" || !match || !req.headers.accept?.includes("text/html")) return next();
     try {
-      const backend = process.env.MEDIA_PROXY_TARGET ?? "http://localhost:8009";
+      const backend = process.env.MEDIA_PROXY_TARGET ?? apiVps;
       const respuesta = await fetch(`${backend}/compartir/${match[1]}?dev=${dev ? "true" : "false"}`);
       if (!respuesta.ok) return next();
       const html = await respuesta.text();
@@ -37,7 +37,7 @@ export default defineConfig({
     // Las imagenes se guardan con URL relativa /media/...: se piden al backend
     proxy: {
       "/media": {
-        target: process.env.MEDIA_PROXY_TARGET ?? "http://localhost:8009",
+        target: process.env.MEDIA_PROXY_TARGET ?? apiVps,
         changeOrigin: true
       },
       ...(apiVps ? {

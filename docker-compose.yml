@@ -45,17 +45,17 @@ services:
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     volumes:
       - ./frontend:/app
       - /app/node_modules
     ports:
       - "5179:5179"
     environment:
-      VITE_API_URL: http://localhost:8009
-      MEDIA_PROXY_TARGET: http://backend:8000
+      VITE_API_URL: /api-vps
+      VPS_API_TARGET: https://acersistemas.site/eventos/api
+      MEDIA_PROXY_TARGET: https://acersistemas.site/eventos/api
     command: npm run dev -- --host 0.0.0.0
-    depends_on:
-      - backend
 
 volumes:
   postgres_data:

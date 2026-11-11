@@ -23,6 +23,7 @@ from app.schemas.eventos import (
 )
 from app.services.proveedores import get_or_create_user, validate_requested_slug
 from app.services.geografia import resolver_geografia
+from app.services.invitados_permisos import asignacion_con_acceso, permisos_de_asignacion
 
 
 def _obtener_salon(db: Session, salon_slug: str) -> Proveedor:
@@ -163,8 +164,7 @@ def confirmar_evento(db: Session, token: str) -> EventoConfirmado:
     propietario = db.get(User, evento.propietario_id)
     if propietario is None or propietario.email.lower() != email or not propietario.activo:
         raise HTTPException(status_code=403, detail="El enlace no corresponde a este evento")
-    if evento.estado == EventoEstado.BORRADOR:
-        evento.estado = EventoEstado.PUBLICADO
+    # El enlace solo valida el email. Publicar requiere una sesion Google y permisos.
     if propietario.email_validado_en is None:
         propietario.email_validado_en = datetime.now(UTC)
     db.commit()
@@ -193,24 +193,20 @@ def rol_en_evento(db: Session, evento: Evento, usuario: User | None) -> str:
         return "superadministrador"
     if evento.propietario_id == usuario.id:
         return "administrador"
-    roles = db.scalars(select(EventoUsuario.rol).where(
+    asignaciones = db.scalars(select(EventoUsuario).where(
         EventoUsuario.evento_id == evento.id, EventoUsuario.usuario_id == usuario.id,
     )).all()
-    if RolEvento.PROPIETARIO in roles:
+    if any(a.rol == RolEvento.PROPIETARIO and asignacion_con_acceso(a) for a in asignaciones):
         return "administrador"
-    if RolEvento.ADMIN_EVENTO in roles:
-        asignacion = db.scalar(select(EventoUsuario).where(EventoUsuario.evento_id == evento.id,
-                              EventoUsuario.usuario_id == usuario.id, EventoUsuario.rol == RolEvento.ADMIN_EVENTO))
-        if asignacion.permisos is None or "configurar_evento" in asignacion.permisos:
-            return "administrador"
-    if RolEvento.ENCARGADO in roles:
+    if any(a.rol == RolEvento.ADMIN_EVENTO and "configurar_evento" in permisos_de_asignacion(a)
+           for a in asignaciones):
+        return "administrador"
+    if any(a.rol == RolEvento.ENCARGADO and asignacion_con_acceso(a) for a in asignaciones):
         return "colaborador"
-    asignaciones = db.scalars(select(EventoUsuario).where(
-        EventoUsuario.evento_id == evento.id, EventoUsuario.usuario_id == usuario.id)).all()
     for rol, etiqueta in [(RolEvento.AGASAJADO, "agasajado"),
                           (RolEvento.GESTOR_INVITADOS, "gestor de invitados"),
                           (RolEvento.CONTROL_INGRESO, "control de ingreso")]:
-        if any(a.rol == rol and a.permisos != [] for a in asignaciones):
+        if any(a.rol == rol and permisos_de_asignacion(a) for a in asignaciones):
             return etiqueta
     return "visitante"
 
