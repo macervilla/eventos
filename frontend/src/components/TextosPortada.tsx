@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
+import { mensajeGuardado, useGuardadoAutomatico } from "./useGuardadoAutomatico";
 
 export type BloqueTexto = { x: number; y: number; visible: boolean };
 export type TextosPortada = Record<"fecha" | "titulo" | "lugar", BloqueTexto>;
@@ -24,17 +25,20 @@ export function TextosPortadaEvento({ textos, configuracion, editable, alGuardar
   const [borrador, setBorrador] = useState<TextosPortada | null>(null);
   const [coloresBorrador, setColoresBorrador] = useState(colores);
   const [seleccionado, setSeleccionado] = useState<Clave>("titulo");
-  const [guardando, setGuardando] = useState(false);
-  const [error, setError] = useState("");
+  const borradorActual = useRef<TextosPortada | null>(null);
+  const coloresActuales = useRef(colores);
+  const guardado = useGuardadoAutomatico(async (valor: { config: TextosPortada; colores: ColoresTextos }) => {
+    await alGuardar(valor.config, valor.colores);
+  });
   const arrastre = useRef<{ clave: Clave; id: number; x: number; y: number; inicial: BloqueTexto; ancho: number; alto: number } | null>(null);
   const enEdicion = editable && borrador !== null;
   const config = enEdicion ? borrador : configuracion;
   const coloresVisibles = enEdicion ? coloresBorrador : colores;
 
   const empezar = () => {
-    setError("");
     setColoresBorrador({ ...colores });
-    if (configuracion) { setBorrador(structuredClone(configuracion)); return; }
+    coloresActuales.current = { ...colores };
+    if (configuracion) { borradorActual.current = structuredClone(configuracion); setBorrador(borradorActual.current); return; }
     const caja = legacy.current!;
     const portada = caja.parentElement!.getBoundingClientRect();
     const inicial = {} as TextosPortada;
@@ -45,13 +49,21 @@ export function TextosPortadaEvento({ textos, configuracion, editable, alGuardar
         y: limitar((rect.top - portada.top) / Math.max(1, portada.height - rect.height) * 100), visible: true
       };
     });
+    borradorActual.current = inicial;
     setBorrador(inicial);
   };
-  const cambiar = (clave: Clave, valor: Partial<BloqueTexto>) => {
-    setBorrador(actual => actual && ({ ...actual, [clave]: { ...actual[clave], ...valor } }));
+  const registrar = () => {
+    if (borradorActual.current) guardado.programar({ config: borradorActual.current, colores: coloresActuales.current });
+  };
+  const cambiar = (clave: Clave, valor: Partial<BloqueTexto>, persistir = true) => {
+    const actual = borradorActual.current;
+    if (!actual) return;
+    borradorActual.current = { ...actual, [clave]: { ...actual[clave], ...valor } };
+    setBorrador(borradorActual.current);
+    if (persistir) registrar();
   };
   const iniciarArrastre = (e: PointerEvent<HTMLDivElement>, clave: Clave) => {
-    if (!enEdicion || guardando || e.button !== 0) return;
+    if (!enEdicion || e.button !== 0) return;
     e.preventDefault();
     setSeleccionado(clave);
     const rect = e.currentTarget.getBoundingClientRect();
@@ -64,21 +76,20 @@ export function TextosPortadaEvento({ textos, configuracion, editable, alGuardar
     const a = arrastre.current;
     if (!a || a.id !== e.pointerId) return;
     cambiar(a.clave, { x: limitar(a.inicial.x + (e.clientX - a.x) / a.ancho * 100),
-      y: limitar(a.inicial.y + (e.clientY - a.y) / a.alto * 100) });
+      y: limitar(a.inicial.y + (e.clientY - a.y) / a.alto * 100) }, false);
   };
   const terminar = (e: PointerEvent<HTMLDivElement>, cancelar = false) => {
     const a = arrastre.current;
     if (!a || a.id !== e.pointerId) return;
-    if (cancelar) cambiar(a.clave, a.inicial);
+    if (cancelar) cambiar(a.clave, a.inicial, false);
+    else { registrar(); void guardado.guardarAhora(); }
     arrastre.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
   const guardar = async () => {
     if (!borrador) return;
-    setGuardando(true); setError("");
-    try { await alGuardar(borrador, coloresBorrador); setBorrador(null); }
-    catch { setError("No se pudieron guardar los textos. Tus cambios siguen disponibles; intenta nuevamente."); }
-    finally { setGuardando(false); }
+    registrar();
+    await guardado.guardarAhora();
   };
   const contenido = (clave: Clave) => clave === "titulo" ? <h1>{textos[clave]}</h1>
     : <p className={clave === "fecha" ? "eyebrow" : undefined}>{textos[clave]}</p>;
@@ -91,13 +102,13 @@ export function TextosPortadaEvento({ textos, configuracion, editable, alGuardar
       return <div key={clave} data-texto={clave}
         className={`texto-portada ${enEdicion ? "texto-portada-editable" : ""} ${enEdicion && seleccionado === clave ? "seleccionado" : ""}`}
         style={{ color: coloresVisibles[clave], left: `${bloque.x}%`, top: `${bloque.y}%`, transform: `translate(-${bloque.x}%, -${bloque.y}%)` }}
-        tabIndex={enEdicion && !guardando ? 0 : undefined}
+        tabIndex={enEdicion ? 0 : undefined}
         role={enEdicion ? "group" : undefined} aria-label={enEdicion ? `Mover ${etiquetas[clave]}` : undefined}
         onFocus={() => setSeleccionado(clave)} onPointerDown={e => iniciarArrastre(e, clave)}
         onPointerMove={mover} onPointerUp={e => terminar(e)} onPointerCancel={e => terminar(e, true)}
-        onLostPointerCapture={() => { arrastre.current = null; }}
+        onLostPointerCapture={() => { if (arrastre.current) { registrar(); void guardado.guardarAhora(); } arrastre.current = null; }}
         onKeyDown={e => {
-          if (!enEdicion || guardando || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+          if (!enEdicion || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
           e.preventDefault();
           const paso = e.shiftKey ? 5 : 1;
           cambiar(clave, { x: limitar(bloque.x + (e.key === "ArrowRight" ? paso : e.key === "ArrowLeft" ? -paso : 0)),
@@ -108,19 +119,19 @@ export function TextosPortadaEvento({ textos, configuracion, editable, alGuardar
       {!enEdicion ? <button className="secondary-button" type="button" onClick={empezar}>{editarColores ? "Mover, ocultar o dar color a textos" : "Mover u ocultar textos"}</button> : <>
         <strong>Textos de portada</strong>
         <p>Arrastra cada texto. Tambien podes seleccionarlo y usar las flechas.</p>
-        {claves.map(clave => <label key={clave}><input type="checkbox" checked={borrador[clave].visible} disabled={guardando}
+        <p role={guardado.estado === "error" ? "alert" : "status"}>{mensajeGuardado(guardado.estado)}</p>
+        {claves.map(clave => <label key={clave}><input type="checkbox" checked={borrador[clave].visible}
           onChange={e => cambiar(clave, { visible: e.target.checked })} /> Mostrar {etiquetas[clave].toLowerCase()}</label>)}
         {editarColores && <div className="textos-portada-colores">
           {claves.map(clave => <label key={clave}>Color de {etiquetas[clave].toLowerCase()}
-            <input type="color" value={coloresBorrador[clave]} disabled={guardando}
-              onChange={e => setColoresBorrador(actual => ({ ...actual, [clave]: e.target.value }))} />
+            <input type="color" value={coloresBorrador[clave]}
+              onChange={e => { coloresActuales.current = { ...coloresActuales.current, [clave]: e.target.value }; setColoresBorrador(coloresActuales.current); registrar(); }} />
           </label>)}
         </div>}
         <div className="textos-portada-acciones">
-          <button className="action-button" type="button" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar textos"}</button>
-          <button className="secondary-button" type="button" disabled={guardando} onClick={() => { setBorrador(null); setError(""); }}>Cancelar</button>
+          <button className="action-button" type="button" disabled={guardado.estado === "guardando"} onClick={guardar}>Guardar</button>
+          <button className="secondary-button" type="button" onClick={async () => { if (await guardado.guardarAhora()) setBorrador(null); }}>Cancelar</button>
         </div>
-        {error && <p className="form-error" role="alert">{error}</p>}
       </>}
     </aside>, contenedorControles)}
   </>;

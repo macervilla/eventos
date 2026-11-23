@@ -34,6 +34,13 @@ class ColoresEvento(BaseModel):
     acento: str = Field(default="#245c48", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
+class TextosSecciones(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    detalles: str = Field(default="Detalles del evento", min_length=1, max_length=180)
+    lugar: str = Field(default="Lugar", min_length=1, max_length=180)
+    galeria: str = Field(default="Imagenes del evento", min_length=1, max_length=180)
+
+
 class GaleriaConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     modo: Literal["grilla", "carrusel"] = "grilla"
@@ -48,6 +55,7 @@ class GaleriaConfig(BaseModel):
 
 
 class EventoEditable(ReferenciaGeograficaSchema):
+    textos_secciones: TextosSecciones | None = None
     colores_textos: ColoresTextosPortada | None = None
     galeria_config: GaleriaConfig | None = None
     titulo_visual: str | None = Field(default=None, max_length=180)
@@ -136,6 +144,7 @@ class EventoConfirmado(BaseModel):
 
 
 class EventoRead(ReferenciaGeograficaSchema):
+    textos_secciones: TextosSecciones = Field(default_factory=TextosSecciones)
     colores_textos: ColoresTextosPortada = Field(default_factory=ColoresTextosPortada)
     textos_portada: TextosPortada | None = None
     galeria_config: GaleriaConfig = Field(default_factory=GaleriaConfig)

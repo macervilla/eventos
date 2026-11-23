@@ -59,7 +59,7 @@ def contacto_aviso(db, evento, rol, contacto=None):
 def preparar_aviso(db, ctx, rol, alta, contacto=None):
     contacto = contacto_aviso(db, ctx.evento, rol, contacto)
     titulo = ctx.evento.titulo_visual or ctx.evento.nombre
-    enlace = settings.frontend_public_url.rstrip("/") + f"/e/{ctx.evento.slug}/acceso-equipo"
+    enlace = settings.frontend_public_url.rstrip("/") + f"/{ctx.evento.slug}/acceso-equipo"
     etiqueta = "Administrador" if rol.rol.value in {"ADMIN_EVENTO", "PROPIETARIO"} else "Agasajado"
     if alta:
         mensaje = (f"{ctx.usuario.email} te asigno el rol de {etiqueta} en {titulo}.\n"

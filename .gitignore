@@ -1,8 +1,10 @@
 .env
 .env.vps
+.env.video.dev
 /actualizacion-eventos.tar.gz
 /actualizacion-geografia.tar.gz
 /actualizacion-acceso.tar.gz
+/actualizacion-video.tar.gz
 /geonames/
 __pycache__/
 *.py[cod]

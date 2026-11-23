@@ -10,8 +10,9 @@ export type GeografiaValor = {
 };
 type Localidad = GeografiaValor & { geoname_id: number; codigo_pais: string; latitud: number; longitud: number };
 
-export function LocalidadAutocomplete({ valor, alCambiar, compacto = false, preservarPin = false }: {
+export function LocalidadAutocomplete({ valor, alCambiar, compacto = false, preservarPin = false, errores = {} }: {
   valor: GeografiaValor; alCambiar: (valor: GeografiaValor) => void; compacto?: boolean; preservarPin?: boolean;
+  errores?: Partial<Record<"localidad" | "provincia" | "pais", string>>;
 }) {
   const id = useId();
   const [manual, setManual] = useState(false);
@@ -55,8 +56,9 @@ export function LocalidadAutocomplete({ valor, alCambiar, compacto = false, pres
     <div className="geo-combobox">
       <label htmlFor={id}>Localidad</label>
       <input id={id} role="combobox" autoComplete="off" aria-autocomplete="list" aria-expanded={mostrar}
+        className={errores.localidad ? "invalid-field" : undefined} aria-invalid={Boolean(errores.localidad)}
         aria-controls={`${id}-lista`} aria-activedescendant={mostrar && activo >= 0 ? `${id}-${activo}` : undefined}
-        aria-describedby={`${id}-ayuda`} value={valor.localidad} placeholder="Escribi al menos 3 caracteres"
+        aria-describedby={`${id}-ayuda${errores.localidad ? ` ${id}-error-localidad` : ""}`} value={valor.localidad} placeholder="Escribi al menos 3 caracteres"
         onFocus={() => setAbierto(true)}
         onChange={e => { alCambiar({ ...valor, localidad: e.target.value, geoname_id: null, codigo_pais: null,
           ...(!preservarPin ? { latitud: null, longitud: null } : {}) }); setAbierto(true); }}
@@ -66,6 +68,7 @@ export function LocalidadAutocomplete({ valor, alCambiar, compacto = false, pres
           if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setActivo(i => i < 0 ? (e.key === "ArrowDown" ? 0 : resultados.length - 1) : (i + (e.key === "ArrowDown" ? 1 : -1) + resultados.length) % resultados.length); }
           if (e.key === "Enter") { e.preventDefault(); if (activo >= 0) elegir(resultados[activo]); }
         }} />
+      {errores.localidad && <span id={`${id}-error-localidad`} className="field-error">{errores.localidad}</span>}
       {mostrar && <ul id={`${id}-lista`} role="listbox" className="geo-sugerencias" aria-label="Localidades encontradas">
         {resultados.map((r, i) => <li id={`${id}-${i}`} key={r.geoname_id} role="option" aria-selected={i === activo}
           className={i === activo ? "activo" : ""} onMouseDown={e => e.preventDefault()} onClick={() => elegir(r)}>
@@ -74,8 +77,16 @@ export function LocalidadAutocomplete({ valor, alCambiar, compacto = false, pres
       </ul>}
     </div>
     {!compacto && <div className="geo-contexto">
-      <label>Provincia / estado<input value={valor.provincia} readOnly={!manual} onChange={e => alCambiar({ ...valor, provincia: e.target.value, geoname_id: null, codigo_pais: null })} /></label>
-      <label>Pais<input value={valor.pais} readOnly={!manual} onChange={e => alCambiar({ ...valor, pais: e.target.value, geoname_id: null, codigo_pais: null })} /></label>
+      <label>Provincia / estado<input value={valor.provincia} readOnly={!manual}
+        className={errores.provincia ? "invalid-field" : undefined} aria-invalid={Boolean(errores.provincia)}
+        aria-describedby={errores.provincia ? `${id}-error-provincia` : undefined}
+        onChange={e => alCambiar({ ...valor, provincia: e.target.value, geoname_id: null, codigo_pais: null })} />
+        {errores.provincia && <span id={`${id}-error-provincia`} className="field-error">{errores.provincia}</span>}</label>
+      <label>Pais<input value={valor.pais} readOnly={!manual}
+        className={errores.pais ? "invalid-field" : undefined} aria-invalid={Boolean(errores.pais)}
+        aria-describedby={errores.pais ? `${id}-error-pais` : undefined}
+        onChange={e => alCambiar({ ...valor, pais: e.target.value, geoname_id: null, codigo_pais: null })} />
+        {errores.pais && <span id={`${id}-error-pais`} className="field-error">{errores.pais}</span>}</label>
     </div>}
     <p id={`${id}-ayuda`} className="geo-ayuda" role="status">
       {cargando ? "Buscando localidades..." : error || (valor.geoname_id ? [valor.localidad, valor.provincia, valor.pais].filter(Boolean).join(", ") :

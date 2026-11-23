@@ -30,7 +30,12 @@ export function BarraSesion() {
   }, [token, location.pathname]);
   const destino = location.pathname === "/ingresar" ? "/" : location.pathname + location.search + location.hash;
   return <nav className="barra-sesion" aria-label="Sesion de Eventos">
-    <Link className="barra-marca" to="/"><Globe size={20} aria-hidden="true" /> Eventos</Link>
+    <div className="barra-inicio">
+      <Link className="barra-marca" to="/"><Globe size={20} aria-hidden="true" /> Eventos</Link>
+      {location.pathname === "/eventos/nuevo" && (
+        <button className="barra-control" type="submit" form="crear-evento">Crear</button>
+      )}
+    </div>
     <div className="barra-cuenta">
       <MenuDesplegable key={token || "sin-sesion"} etiqueta="Menú" icono={<Menu size={19} aria-hidden="true" />} className="menu-cuenta">
         <Link className="barra-control" to="/proveedores"><Search size={19} aria-hidden="true" /> Buscar proveedores</Link>

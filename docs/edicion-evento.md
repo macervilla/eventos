@@ -1,6 +1,6 @@
 # Acceso y edicion desde la invitacion
 
-La pagina `/e/{slug}` conserva la invitacion publica y muestra **Ingresar** en la
+La pagina `/{slug}` conserva la invitacion publica y muestra **Ingresar** en la
 esquina superior derecha. Google se abre desde una ventana de ingreso; un error
 de autenticacion no impide cerrar esa ventana y seguir viendo la invitacion.
 El ingreso se completa sobre la misma URL. La alternativa por email tambien

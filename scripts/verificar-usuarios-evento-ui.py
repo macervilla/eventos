@@ -17,13 +17,14 @@ def main():
                 dict(id=4, email="nuevo@example.com", nombre="Nuevo", activo=True, es_superadministrador=False),
             ]
             asignaciones = dict(propietario_id=3, items=[
-                dict(**cuentas[0], es_propietario=False, roles=[], acceso_efectivo=True),
+                dict(**cuentas[0], es_propietario=False, roles=["ADMIN_EVENTO", "AGASAJADO"], acceso_efectivo=True),
                 dict(**cuentas[1], es_propietario=True, roles=["PROPIETARIO"], acceso_efectivo=True),
             ])
             evento = dict(id=1, nombre="cumple atoto", slug="cumple-atoto", propietario_email=cuentas[1]["email"],
                           activo=True, estado="PUBLICADO", fecha_inicio=None)
             cambios = []
             fallar = [False]
+            ruta_pendiente = [True]
 
             def api(route):
                 ruta = urlparse(route.request.url).path.removeprefix("/api-vps")
@@ -53,6 +54,9 @@ def main():
                                 eventos_publicados=1, eventos_borrador=0, eventos_proximos=0,
                                 proveedores_total=0, proveedores_activos=0)
                 elif ruta == "/administracion/eventos/1/usuarios":
+                    if ruta_pendiente[0]:
+                        route.fulfill(status=404, content_type="application/json", body=json.dumps({"detail": "Not Found"}))
+                        return
                     data = asignaciones
                 elif ruta == "/administracion/usuarios":
                     data = dict(items=cuentas, total=3)
@@ -73,8 +77,12 @@ def main():
             page.get_by_role("button", name="Usuarios de cumple atoto", exact=True).click()
             ventana = page.get_by_role("dialog", name="Usuarios de cumple atoto", exact=True)
             expect(ventana).to_be_visible()
+            expect(ventana.get_by_role("alert")).to_contain_text("Actualiza el backend del VPS")
+            ruta_pendiente[0] = False
+            ventana.get_by_role("button", name="Reintentar", exact=True).click()
             expect(ventana.get_by_role("button", name="Quitar usuario mpcssarchivos@gmail.com")).to_be_disabled()
             expect(ventana).to_contain_text("Superadministrador: acceso global")
+            expect(ventana).to_contain_text("Administrador del evento, Agasajado")
             ventana.get_by_label("Cuenta", exact=True).select_option("4")
             ventana.get_by_label("Rol a asignar").select_option("AGASAJADO")
             ventana.get_by_role("button", name="Agregar usuario", exact=True).click()

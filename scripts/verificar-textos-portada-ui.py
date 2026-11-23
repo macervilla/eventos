@@ -19,6 +19,8 @@ def main():
     colores_guardados = []
 
     def api(route):
+        if "/publico/" in route.request.url:
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"tipo": "evento"}))
         url = route.request.url
         if url.endswith("/textos-portada"):
             if fallar:
@@ -50,7 +52,7 @@ def main():
         context.route("http://localhost:8009/**", api)
         page = context.new_page()
         base = os.getenv("EVENTOS_UI_URL", "http://localhost:5179")
-        page.goto(base + "/e/prueba", wait_until="domcontentloaded")
+        page.goto(base + "/prueba", wait_until="domcontentloaded")
         page.get_by_role("button", name="Menu del evento", exact=True).click()
         page.get_by_role("button", name="Editar evento", exact=True).click()
         page.get_by_role("button", name="Editar datos del evento", exact=True).click()

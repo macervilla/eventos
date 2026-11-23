@@ -17,6 +17,8 @@ def main():
                   galeria_config=dict(modo="grilla", filas=2, columnas=2))
 
     def api(route):
+        if "/publico/" in route.request.url:
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"tipo": "evento"}))
         url = route.request.url
         if url.endswith("/acceso/yo"):
             data = dict(email="administrador@example.com", usuario_id=1,
@@ -38,7 +40,7 @@ def main():
             context.route("**/api-vps/**", api)
             context.route("http://localhost:8009/**", api)
             page = context.new_page()
-            page.goto(os.getenv("EVENTOS_UI_URL", "http://localhost:5179") + "/e/prueba", wait_until="domcontentloaded")
+            page.goto(os.getenv("EVENTOS_UI_URL", "http://localhost:5179") + "/prueba", wait_until="domcontentloaded")
             cuenta = page.get_by_role("button", name="Menú", exact=True)
             opciones = cuenta
             expect(cuenta).to_be_visible()

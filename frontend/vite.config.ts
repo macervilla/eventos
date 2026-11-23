@@ -7,7 +7,7 @@ const apiVps = process.env.VPS_API_TARGET ?? "https://acersistemas.site/eventos/
 function compartirHtml(dev: boolean, transformar?: (url: string, html: string) => Promise<string>) {
   return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const ruta = new URL(req.url || "/", "http://localhost").pathname;
-    const match = ruta.match(/^\/e\/([a-z0-9-]+)(?:\/i\/[A-Za-z0-9_-]+)?\/?$/);
+    const match = ruta.match(/^\/([a-z0-9-]+)(?:\/i\/[A-Za-z0-9_-]+)?\/?$/);
     if (req.method !== "GET" || !match || !req.headers.accept?.includes("text/html")) return next();
     try {
       const backend = process.env.MEDIA_PROXY_TARGET ?? apiVps;
@@ -17,7 +17,7 @@ function compartirHtml(dev: boolean, transformar?: (url: string, html: string) =
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Referrer-Policy", "no-referrer");
       res.setHeader("Cache-Control", "no-store");
-      res.end(transformar ? await transformar(`/e/${match[1]}`, html) : html);
+      res.end(transformar ? await transformar(`/${match[1]}`, html) : html);
     } catch { next(); }
   };
 }
@@ -36,6 +36,17 @@ export default defineConfig({
     watch: { usePolling: true, interval: 300 },
     // Las imagenes se guardan con URL relativa /media/...: se piden al backend
     proxy: {
+      ...Object.fromEntries(["/eventos/rtc", "/rtc"].map(prefijo => [prefijo, {
+        target: process.env.MEDIAMTX_WEBRTC_TARGET ?? "https://acersistemas.site/eventos/rtc",
+        changeOrigin: true,
+        rewrite: (path: string) => path.slice(prefijo.length),
+        configure(proxy: { on: (evento: string, listener: (res: { headers: Record<string, string | string[] | undefined> }) => void) => void }) {
+          proxy.on("proxyRes", res => {
+            const location = res.headers.location;
+            if (typeof location === "string" && location.startsWith("/evt-")) res.headers.location = prefijo + location;
+          });
+        }
+      }])),
       "/media": {
         target: process.env.MEDIA_PROXY_TARGET ?? apiVps,
         changeOrigin: true

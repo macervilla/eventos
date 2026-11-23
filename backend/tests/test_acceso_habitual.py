@@ -56,15 +56,12 @@ def test_ingresos_google_repetidos_no_envian_email(contexto, monkeypatch):
     assert usuario.google_subject == "google-estable" and usuario.email_validado_en is not None
 
 
-def test_hotmail_vinculacion_inicial_y_luego_google_sin_mail(contexto, monkeypatch):
+def test_cuenta_google_externa_no_requiere_correo_adicional(contexto, monkeypatch):
     client, db, _, usuario, _ = contexto
     usuario.email = "persona@hotmail.com"
     db.commit()
     google(monkeypatch, usuario.email)
-    assert client.post("/acceso/google", json={"credential": "google"}).status_code == 403
-    inicial = client.post("/acceso/enlace", json={"token": crear_token_bienvenida(usuario)}).json()["token"]
-    assert client.post("/acceso/google", json={"credential": "google"},
-                       headers={"Authorization": f"Bearer {inicial}"}).status_code == 200
+    assert client.post("/acceso/google", json={"credential": "google"}).status_code == 200
     # Otro navegador sin sesion local: la identidad ya vinculada basta.
     assert client.post("/acceso/google", json={"credential": "google"}).json()["token"]
 
@@ -91,7 +88,7 @@ def test_bienvenida_confirma_solo_el_evento_de_su_destino(contexto):
     evento.estado = EventoEstado.BORRADOR
     otro = Evento(nombre="Otro", slug="otro-pendiente", propietario_id=usuario.id, estado=EventoEstado.BORRADOR)
     db.add(otro); db.commit()
-    respuesta = client.post("/acceso/enlace", json={"token": crear_token_bienvenida(usuario, f"/e/{evento.slug}")})
+    respuesta = client.post("/acceso/enlace", json={"token": crear_token_bienvenida(usuario, f"/{evento.slug}")})
     assert respuesta.status_code == 200
     assert evento.estado == EventoEstado.BORRADOR and otro.estado == EventoEstado.BORRADOR
     assert respuesta.json()["requiere_google"]
@@ -104,7 +101,7 @@ def test_alta_eventos_verificada_no_reenvia_y_no_publica_por_solo_escribir_email
     def prohibido(*args):
         raise AssertionError("No debe reenviar una bienvenida validada")
     monkeypatch.setattr("app.services.bienvenida.send_welcome_email", prohibido)
-    datos = {"nombre": "Nuevo", "slug": "nuevo", "email": usuario.email, "lugar_tipo": "domicilio", "direccion": "Calle 1",
+    datos = {"nombre": "Nuevo", "slug": "evento-nuevo", "email": usuario.email, "lugar_tipo": "domicilio", "direccion": "Calle 1",
              "localidad": "Rio Gallegos", "provincia": "Santa Cruz", "pais": "Argentina"}
     r = client.post("/eventos", json=datos, headers=auth(usuario))
     assert r.status_code == 201 and r.json()["confirmado"] is True
@@ -118,12 +115,15 @@ def test_alta_eventos_verificada_no_reenvia_y_no_publica_por_solo_escribir_email
     assert client.post(f"/eventos/{evento.slug}/publicar", headers=auth(usuario)).json()["confirmado"] is True
 
 
-def test_correo_externo_desconocido_no_puede_reservar_identidad(contexto, monkeypatch):
+def test_cuenta_google_externa_nueva_no_recibe_permisos(contexto, monkeypatch):
     client, db, _, _, _ = contexto
     google(monkeypatch, "nuevo@hotmail.com")
-    assert client.post("/acceso/google", json={"credential": "google"}).status_code == 403
+    r = client.post("/acceso/google", json={"credential": "google"})
+    assert r.status_code == 200 and r.json()["token"] and r.json()["opciones"] == []
     from app.models.usuarios import User
-    assert db.scalar(select(User).where(User.email == "nuevo@hotmail.com")) is None
+    usuario = db.scalar(select(User).where(User.email == "nuevo@hotmail.com"))
+    assert usuario and not usuario.es_superadministrador
+    assert client.get("/administracion/resumen", headers={"Authorization": "Bearer " + r.json()["token"]}).status_code == 403
 
 
 def test_bienvenida_no_se_duplica_entre_cuentas_con_mismo_correo(contexto, monkeypatch):

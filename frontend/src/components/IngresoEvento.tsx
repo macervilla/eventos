@@ -23,11 +23,11 @@ export function IngresoEvento({ slug, alIngresar, alCerrar }: { slug: string; al
     } finally { setCargando(false); }
   }
   return <Ventana titulo="Ingresar al evento" alCerrar={alCerrar}>
-    <p>Inicia sesion para consultar tu acceso a este evento. La invitacion sigue disponible si no podes ingresar.</p>
+    <p>Elegi tu cuenta de Google. Verificaremos si esta autorizada para este evento y cargaremos tus invitaciones y permisos asignados.</p>
     <GoogleSignIn onCredential={credential => { if (!cargando) void ingresar(credential); }} />
     {cargando && <p role="status">Validando cuenta...</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <p><Link to={`/ingresar?destino=${encodeURIComponent(`/e/${slug}`)}`}>Ver mis sitios o vincular mi cuenta</Link></p>
+    <p><Link to={`/ingresar?destino=${encodeURIComponent(`/${slug}`)}`}>Ver mis sitios o vincular mi cuenta</Link></p>
     <button className="secondary-button" type="button" onClick={alCerrar}>Volver a la invitacion</button>
   </Ventana>;
 }

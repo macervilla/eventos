@@ -73,14 +73,18 @@ Entidades principales:
 
 ## Portal y rutas públicas
 
+Las rutas de React son relativas al prefijo `/eventos/` del despliegue.
+La URL publica definitiva de ambas entidades es `/eventos/{slug}`.
+
 ```text
-/                         Portal principal público
-/proveedores              Búsqueda pública de proveedores
+/                         Portal principal publico
+/proveedores              Busqueda publica de proveedores
 /proveedores/nuevo        Alta inicial de proveedor
-/proveedores/{slug}/editar Redirige a /p/{slug}
-/p/{slug}                 Página pública del proveedor (modo edición si el usuario la administra)
 /eventos/nuevo            Alta de evento
-/e/{slug}                 Página del evento (modo edición para su propietario)
+/{slug}                   Pagina publica de evento o proveedor, resuelta internamente
+/{slug}/i/{token}         Invitacion personal
+/{slug}/album             Album del evento
+/{slug}/invitados         Gestion de invitados
 ```
 
 La home separa los dos flujos principales:
@@ -101,7 +105,7 @@ Ver [flujo de acceso, cuentas externas y pruebas](docs/ingreso-google.md).
 - Email manual: `POST /acceso/solicitar-enlace` envía un enlace mágico (vence en 30 min). Al abrirlo, `/ingresar?enlace=...` lo canjea en `POST /acceso/enlace` por el JWT de sesión.
 - El frontend guarda el JWT en `localStorage` y lo envía como `Authorization: Bearer`.
 - `PUT`/`DELETE /proveedores/{slug}` y la subida de media exigen sesión del dueño del proveedor.
-- El dueño que entra a `/p/{slug}` ve íconos para cambiar la portada, editar datos y cambiar la ubicación en ventanas emergentes.
+- El dueño que entra a `/{slug}` ve íconos para cambiar la portada, editar datos y cambiar la ubicación en ventanas emergentes.
 - Al guardar un enlace de Google Maps, el backend intenta extraer latitud/longitud (sigue enlaces cortos `maps.app.goo.gl`).
 
 ### Configurar el acceso con Google en desarrollo
@@ -263,7 +267,7 @@ La respuesta incluye `distancia_km` cuando hay coordenadas de búsqueda y ordena
 
 ## Eventos
 
-La ubicación de un evento siempre es un salón existente (proveedor activo con categoría `salon`), guardado en `eventos.salon_id`. Al guardar, la dirección y las coordenadas del evento se copian del salón. El email del organizador es obligatorio: el evento se crea en `BORRADOR` y no es visible hasta abrir el enlace del mail (`/e/{slug}?confirmar=...`, vence en 48 h). Ese enlace lo pasa a `PUBLICADO`, inicia sesión y abre la página del evento `/e/{slug}` en modo administrador (portada, datos y salón editables en ventanas emergentes).
+La ubicación de un evento siempre es un salón existente (proveedor activo con categoría `salon`), guardado en `eventos.salon_id`. Al guardar, la dirección y las coordenadas del evento se copian del salón. El email del organizador es obligatorio: el evento se crea en `BORRADOR` y no es visible hasta abrir el enlace del mail (`/{slug}?confirmar=...`, vence en 48 h). Ese enlace lo pasa a `PUBLICADO`, inicia sesión y abre la página del evento `/{slug}` en modo administrador (portada, datos y salón editables en ventanas emergentes).
 
 ## Baja lógica
 
@@ -331,3 +335,56 @@ git status
 git add .
 git commit -m "Agrega decision y ejecucion de multiples herramientas"
 git push origin main
+
+
+http://localhost:5179
+
+
+
+-----------
+desde PowerShell:
+
+cd C:\mentoria\proyectosvs\eventos
+scp actualizacion-acceso.tar.gz vps:/tmp/
+ssh vps
+-------------
+Después, dentro del VPS:
+
+set -e
+cd /var/www/eventos
+dc() { docker compose --env-file .env.vps -f compose.vps.yml "$@"; }
+
+# Respaldo
+bash scripts/geografia-vps.sh backup
+
+# Actualización
+tar -xzf /tmp/actualizacion-acceso.tar.gz -C /var/www/eventos
+dc build backend
+dc run --rm --no-deps backend alembic upgrade head
+dc run --rm frontend-build
+dc up -d --no-deps --force-recreate backend
+
+# Verificación
+curl --fail https://acersistemas.site/eventos/api/health
+
+
+------
+
+
+
+----
+
+$destino = Join-Path (Split-Path (Get-Location) -Parent) "eventos.zip"
+
+tar -a -c -f $destino `
+  --exclude=".git" `
+  --exclude=".env" `
+  --exclude=".env.*" `
+  --exclude="node_modules" `
+  --exclude="__pycache__" `
+  --exclude=".venv" `
+  --exclude="venv" `
+  --exclude="dist" `
+  --exclude="build" `
+  .-----
+URLs publicas unificadas: ver [migracion y despliegue](docs/urls-publicas.md).

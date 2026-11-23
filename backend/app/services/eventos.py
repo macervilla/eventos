@@ -20,6 +20,7 @@ from app.schemas.eventos import (
     SalonResumen,
     TextosPortada,
     ColoresTextosPortada,
+    TextosSecciones,
 )
 from app.services.proveedores import get_or_create_user, validate_requested_slug
 from app.services.geografia import resolver_geografia
@@ -47,6 +48,12 @@ def _aplicar_datos(evento: Evento, data: EventoEditable, salon: Proveedor | None
     evento.titulo_visual = (data.titulo_visual or "").strip() or None
     evento.colores = data.colores.model_dump()
     existentes = {m.modulo: m for m in evento.modulos}
+    if data.textos_secciones is not None:
+        modulo = existentes.get("textos_secciones")
+        if modulo is None:
+            modulo = EventoModulo(modulo="textos_secciones", activo=False)
+            evento.modulos.append(modulo)
+        modulo.configuracion_json = data.textos_secciones.model_dump()
     if data.colores_textos is not None:
         modulo = existentes.get("colores_textos")
         if modulo is None:
@@ -99,6 +106,7 @@ def _aplicar_datos(evento: Evento, data: EventoEditable, salon: Proveedor | None
 def evento_a_read(evento: Evento) -> EventoRead:
     salon = evento.salon
     return EventoRead(
+        textos_secciones=TextosSecciones(**next((m.configuracion_json or {} for m in evento.modulos if m.modulo == "textos_secciones"), {})),
         colores_textos=ColoresTextosPortada(**next((m.configuracion_json or {} for m in evento.modulos if m.modulo == "colores_textos"), {})),
         textos_portada=next((TextosPortada(**m.configuracion_json) for m in evento.modulos if m.modulo == "textos_portada"), None),
         galeria_config=GaleriaConfig(**next((m.configuracion_json or {} for m in evento.modulos if m.modulo == "galeria"), {})),

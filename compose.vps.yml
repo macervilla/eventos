@@ -1,5 +1,18 @@
 # Archivo independiente: usar -f compose.vps.yml, sin combinar con el de desarrollo.
 services:
+  mediamtx:
+    profiles: [video]
+    image: bluenviron/mediamtx:1.21.3
+    restart: unless-stopped
+    volumes:
+      - ./infra/mediamtx.yml:/mediamtx.yml:ro
+    environment:
+      MTX_AUTHHTTPADDRESS: http://mediamtx:${MEDIAMTX_AUTH_SECRET:-video-deshabilitado}@backend:8000/interno/mediamtx/auth
+      MTX_WEBRTCADDITIONALHOSTS: ${WEBRTC_PUBLIC_HOST:-127.0.0.1}
+    ports:
+      - "127.0.0.1:8889:8889"
+      - "8189:8189/udp"
+      - "8189:8189/tcp"
   db:
     image: postgres:16-alpine
     restart: unless-stopped

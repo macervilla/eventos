@@ -61,9 +61,10 @@ export function lugarParaGuardar(lugar: DatosLugar) {
 type SelectorLugarProps = {
   valor: DatosLugar;
   alCambiar: (cambios: Partial<DatosLugar>) => void;
+  mostrarErrores?: boolean;
 };
 
-export function SelectorLugar({ valor, alCambiar }: SelectorLugarProps) {
+export function SelectorLugar({ valor, alCambiar, mostrarErrores = false }: SelectorLugarProps) {
   const [salones, setSalones] = useState<Proveedor[]>([]);
   const [buscando, setBuscando] = useState(false);
   const [resultados, setResultados] = useState<ResultadoBusqueda[]>([]);
@@ -152,7 +153,9 @@ export function SelectorLugar({ valor, alCambiar }: SelectorLugarProps) {
         <>
           <label>
             Salon
-            <select value={valor.salon_slug} onChange={(e) => alCambiar({ salon_slug: e.target.value })}>
+            <select value={valor.salon_slug} onChange={(e) => alCambiar({ salon_slug: e.target.value })}
+              className={mostrarErrores && !valor.salon_slug ? "invalid-field" : undefined}
+              aria-invalid={mostrarErrores && !valor.salon_slug}>
               <option value="">Elegi un salon...</option>
               {salones.map((salon) => (
                 <option key={salon.slug} value={salon.slug}>
@@ -184,12 +187,18 @@ export function SelectorLugar({ valor, alCambiar }: SelectorLugarProps) {
             <label className="wide">
               Direccion
               <input
+                className={mostrarErrores && !valor.direccion.trim() ? "invalid-field" : undefined}
+                aria-invalid={mostrarErrores && !valor.direccion.trim()}
                 value={valor.direccion}
                 placeholder="Calle y numero"
                 onChange={(e) => alCambiar({ direccion: e.target.value })}
               />
             </label>
-            <LocalidadAutocomplete preservarPin valor={valor} alCambiar={geo => alCambiar({
+            <LocalidadAutocomplete preservarPin valor={valor} errores={mostrarErrores ? {
+              localidad: !valor.localidad.trim() ? "Carga la localidad." : undefined,
+              provincia: !valor.provincia.trim() && !valor.geoname_id ? "Carga la provincia." : undefined,
+              pais: !valor.pais.trim() ? "Carga el pais." : undefined
+            } : undefined} alCambiar={geo => alCambiar({
               localidad: geo.localidad, provincia: geo.provincia, pais: geo.pais,
               geoname_id: geo.geoname_id, codigo_pais: geo.codigo_pais,
               latitud: geo.latitud ?? null, longitud: geo.longitud ?? null

@@ -51,7 +51,7 @@ def test_cuenta_sin_asignacion_no_hereda_eventos_ni_proveedores(contexto):
     client, db, admin, usuario, evento = contexto
     db.add(Proveedor(nombre_comercial="Propio", slug="propio", usuario_id=usuario.id,
                      email=usuario.email))
-    db.add(Proveedor(nombre_comercial="Ajeno", slug="ajeno", usuario_id=admin.id,
+    db.add(Proveedor(nombre_comercial="Ajeno", slug="proveedor-ajeno", usuario_id=admin.id,
                      email=admin.email))
     otro = Evento(nombre="Ajeno", slug="ajeno", propietario_id=admin.id, estado=evento.estado)
     db.add(otro)
@@ -61,7 +61,7 @@ def test_cuenta_sin_asignacion_no_hereda_eventos_ni_proveedores(contexto):
     assert {(o["tipo"], o["slug"]) for o in sitios} == {
         ("evento", evento.slug), ("proveedor", "propio")}
     assert client.get("/invitados/ajeno/lista", headers=headers).status_code == 403
-    assert client.delete("/proveedores/ajeno", headers=headers).status_code == 403
+    assert client.delete("/proveedores/proveedor-ajeno", headers=headers).status_code == 403
     assert client.get("/administracion/resumen", headers=headers).status_code == 403
 
 

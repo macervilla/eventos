@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { obtenerTokenSesion } from "../api/sesion";
 import { fechaLocalAIso } from "../components/EdicionEvento";
+import { SelectorFechaHora } from "../components/SelectorFechaHora";
 import { mensajeDeError } from "../components/EdicionProveedor";
 import {
   DatosLugar,
@@ -80,6 +81,7 @@ export function EventFormPage() {
 
   const guardar = (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault();
+    if (guardando) return;
     if (!validar()) return;
 
     const payload = {
@@ -96,7 +98,7 @@ export function EventFormPage() {
     api
       .post<EventoCreado>("/eventos", payload)
       .then(({ data }) => {
-        if (data.confirmado) { navigate(`/e/${data.slug}`); return; }
+        if (data.confirmado) { navigate(`/${data.slug}`); return; }
         setSlug(data.slug);
         setEmailConfirmacion(data.email_confirmacion || email.trim());
         setBienvenidaEnviada(data.bienvenida_enviada);
@@ -126,7 +128,7 @@ export function EventFormPage() {
           </p>
           <div className="confirmation-actions">
             {errorCorreo && <p className="form-error" role="alert">Tu evento se guardo, pero no pudimos enviar la bienvenida: {errorCorreo}</p>}
-            <button className="action-button" type="button" onClick={() => navigate(`/ingresar?destino=${encodeURIComponent(`/e/${slug}`)}`)}>Ingresar con Google</button>
+            <button className="action-button" type="button" onClick={() => navigate(`/ingresar?destino=${encodeURIComponent(`/${slug}`)}`)}>Ingresar con Google</button>
             <button className="secondary-button" type="button" onClick={() => navigate("/")}>
               <ArrowLeft size={18} aria-hidden="true" />
               Volver al inicio
@@ -139,18 +141,12 @@ export function EventFormPage() {
 
   return (
     <main className={`providers-page template-live-page ${template.className}`}>
-      <header className="page-header compact-header">
-        <div>
-          <p className="eyebrow">Evento</p>
-          <h1>Crear evento</h1>
-        </div>
-      </header>
-
-      <form className="provider-form" onSubmit={guardar} noValidate>
+      <form id="crear-evento" aria-label="Crear evento" className="provider-form" onSubmit={guardar} noValidate>
         <label>
           Nombre del evento
           <input
             className={errores.nombre ? "invalid-field" : undefined}
+            aria-invalid={Boolean(errores.nombre)}
             value={nombre}
             onChange={(e) => cambiarNombre(e.target.value)}
             placeholder="Cumple de Ale"
@@ -161,6 +157,7 @@ export function EventFormPage() {
           Slug (direccion del evento)
           <input
             className={errores.slug ? "invalid-field" : undefined}
+            aria-invalid={Boolean(errores.slug)}
             value={slug}
             onChange={(e) => {
               setSlugEditadoAMano(true);
@@ -170,17 +167,17 @@ export function EventFormPage() {
           />
           {errores.slug && <span className="field-error">{errores.slug}</span>}
         </label>
-        <label>
-          Fecha y hora
-          <input type="datetime-local" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-        </label>
+        <SelectorFechaHora valor={fecha} alCambiar={setFecha} />
         <div className="wide">
           <div className="field-heading">Lugar del evento</div>
           <SelectorLugar
             valor={lugar}
+            mostrarErrores={Boolean(errores.lugar)}
             alCambiar={(cambios) => {
               setLugar((actual) => ({ ...actual, ...cambios }));
-              setErrores((actual) => ({ ...actual, lugar: "" }));
+              setErrores((actual) => actual.lugar
+                ? { ...actual, lugar: validarLugar({ ...lugar, ...cambios }) || "" }
+                : actual);
             }}
           />
           {errores.lugar && <span className="field-error">{errores.lugar}</span>}
@@ -195,6 +192,7 @@ export function EventFormPage() {
           Tu email (obligatorio: ahi te llega el enlace para confirmar el evento)
           <input
             className={errores.email ? "invalid-field" : undefined}
+            aria-invalid={Boolean(errores.email)}
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}

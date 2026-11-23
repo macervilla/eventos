@@ -47,7 +47,7 @@ class LocalMediaStorage:
             raise HTTPException(status_code=400, detail="Ruta de media invalida")
         return path
 
-    async def save_image(self, file: UploadFile, *, owner: str, owner_uuid: str, kind: str) -> StoredMedia:
+    async def prepare_image(self, file: UploadFile) -> tuple[bytes, str, str]:
         content = await file.read(settings.max_upload_bytes + 1)
         if not content:
             raise HTTPException(status_code=400, detail="Archivo vacio")
@@ -70,6 +70,10 @@ class LocalMediaStorage:
                 content = salida.getvalue()
         except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise HTTPException(400, "Contenido de imagen invalido") from exc
+        return content, mime_type, extension
+
+    async def save_image(self, file: UploadFile, *, owner: str, owner_uuid: str, kind: str) -> StoredMedia:
+        content, mime_type, extension = await self.prepare_image(file)
         media_uuid = str(uuid4())
         object_key = f"{owner}/{owner_uuid}/{kind}/{media_uuid}{extension}"
         path = self._safe_path(object_key)

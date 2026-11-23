@@ -1,5 +1,6 @@
 """Flujos de agasajados con API y agenda simuladas; no envia mensajes reales."""
 import json
+import os
 import re
 
 from playwright.sync_api import expect, sync_playwright
@@ -35,6 +36,8 @@ def main():
                 enviados = []
 
                 def api(route):
+                    if "/publico/" in route.request.url:
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps({"tipo": "evento"}))
                     url = route.request.url.split("?")[0]
                     if route.request.method == "POST":
                         enviados.append((url, route.request.post_data_json))
@@ -66,12 +69,12 @@ def main():
                 context.add_init_script("""
                     localStorage.setItem('eventos_sesion','prueba');
                     Object.defineProperty(navigator,'contacts',{value:{select:async()=>[
-                      {name:['Luis'],email:['luis@example.com'],tel:['+54 9 2966 123456']}
+                      {name:['Luis'],email:['luis@example.com'],tel:['','+54 9 2966 123456']}
                     ]}});
                 """)
                 context.route("**/api-vps/**", api)
                 page = context.new_page()
-                page.goto("http://localhost:5179/e/prueba" + ("/invitados" if admin else ""))
+                page.goto(os.getenv("EVENTOS_UI_URL", "http://localhost:5179") + "/prueba" + ("/invitados" if admin else ""))
                 if admin:
                     page.on("dialog", lambda dialog: dialog.accept())
                     expect(page.locator(".agasajado-asignado")).to_have_count(2)
@@ -109,6 +112,8 @@ def main():
                     page.get_by_role("button", name="Agregar invitado individual").click()
                     page.get_by_role("button", name="Elegir contacto del telefono").click()
                     expect(page.get_by_label("Nombre", exact=True)).to_have_value("Luis")
+                    expect(page.get_by_label("Telefono (opcional)", exact=True)).to_have_value("+54 9 2966 123456")
+                    expect(page.get_by_label("WhatsApp (numero con codigo de pais)", exact=True)).to_have_value("+54 9 2966 123456")
                     page.get_by_role("button", name="Guardar", exact=True).click()
                     expect(page.get_by_role("button", name="Guardar", exact=True)).to_have_count(0)
                     assert enviados[-1][1]["nombre"] == "Luis"

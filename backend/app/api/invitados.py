@@ -11,14 +11,14 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.seguridad import obtener_usuario_actual, obtener_usuario_opcional
 from app.db.session import get_db
-from app.models.enums import RolEvento
-from app.models.eventos import EventoUsuario
+from app.models.enums import RolEvento, EventoEstado
+from app.models.eventos import Evento, EventoUsuario
 from app.models.invitaciones import (
     DistribucionInvitacion,
     Invitacion,
@@ -32,6 +32,7 @@ from app.schemas.invitados import (
     AsignacionRol,
     AsignarAgasajados,
     ConfigInvitados,
+    CuentaInvitado,
     CorregirIngreso,
     Distribuir,
     Escaneo,
@@ -39,6 +40,7 @@ from app.schemas.invitados import (
     InvitadoDatos,
     PortalAcceso,
     PortalRSVP,
+    PortalConfirmacion,
     RegistrarIngreso,
 )
 from app.services import agasajados as ag
@@ -48,11 +50,12 @@ from app.services.invitados_excel import excel, importar, preview
 from app.services.invitados_notificaciones import notificar_qr
 from app.services.invitados_permisos import ALLOWED, DEFAULTS, acceso
 from app.services.invitados_portal import (
-    acceso_portal,
+    acceso_confirmacion,
     enviar_codigo,
     qr_png,
     resolver_portal,
     validar_acceso,
+    confirmar_personas,
 )
 from app.services.media_storage import media_storage
 from app.services.portada_invitacion import imagen_invitacion
@@ -80,6 +83,7 @@ def descarga(
 @router.get("/{slug}/acceso")
 def mi_acceso(slug: str, db: Session = DB, usuario: User = USUARIO):
     ctx = acceso(db, slug, usuario, habilitado=False)
+    from app.services.solicitudes_invitacion import administrador, agasajados
     asignacion = db.scalar(select(MovimientoInvitacion).where(
         MovimientoInvitacion.evento_id == ctx.evento.id,
         MovimientoInvitacion.accion.in_(["asignacion_agasajado", "asignacion_rol"]),
@@ -92,6 +96,8 @@ def mi_acceso(slug: str, db: Session = DB, usuario: User = USUARIO):
         "permisos": sorted(ctx.permisos),
         "solo_responsable": ctx.propio,
         "usuario_id": usuario.id,
+        "puede_gestionar_solicitudes": "ver_invitados" in ctx.permisos and (
+            administrador(db, ctx) or usuario.id in agasajados(db, ctx.evento.id)),
         "config": s.configuracion(db, ctx.evento),
         "roles_disponibles": {k: sorted(v) for k, v in ALLOWED.items()},
         "agasajado_asignado_por": (asignador.nombre or asignador.email) if asignador else None,
@@ -336,6 +342,13 @@ def listar(
     creadores = {u.id: u.nombre or u.email for u in db.scalars(
         select(User).where(User.id.in_(creadores_ids))
     )} if "ver_invitados" in ctx.permisos else {}
+    pendientes_revision = set(db.scalars(select(MovimientoInvitacion.invitacion_id).where(
+        MovimientoInvitacion.evento_id == ctx.evento.id,
+        MovimientoInvitacion.accion == "posible_duplicado",
+        MovimientoInvitacion.invitacion_id.in_([inv.id for inv in items]),
+    ))) if "ver_invitados" in ctx.permisos else set()
+    for inv in items:
+        inv._requiere_revision_duplicado = inv.id in pendientes_revision
     return {
         "total": total,
         "items": [{**s.resumen_inv(inv, "ver_invitados" in ctx.permisos),
@@ -362,6 +375,25 @@ def generar_pin_personal(slug: str, inv_id: int, data: EntregaPin, response: Res
     db.commit()
     response.headers["Cache-Control"] = "no-store"
     return {"pin": pin, "message": "Se muestra una sola vez. Entregalo personalmente o por un canal distinto al enlace de invitacion. No lo incluyas en la tarjeta ni en el mismo mensaje."}
+
+
+@router.put("/{slug}/lista/{inv_id}/cuenta")
+def vincular_cuenta_invitado(slug: str, inv_id: int, data: CuentaInvitado, db: Session = DB, usuario: User = USUARIO):
+    ctx = acceso(db, slug, usuario, "editar_invitados")
+    inv = s.obtener(db, ctx, inv_id, True)
+    cuenta = get_or_create_user(db, str(data.email), "")
+    if not cuenta.activo:
+        raise HTTPException(409, "La cuenta elegida no esta activa")
+    anterior = inv.usuario_id
+    if anterior != cuenta.id:
+        inv.usuario = cuenta
+        inv.actualizado_por = usuario.id
+        s.auditar(db, ctx.evento.id, "cuenta_invitado_vinculada", usuario.id, inv.id,
+                  cuenta_anterior_id=anterior, cuenta_id=cuenta.id, origen="administrador_o_agasajado")
+        if inv.activo and inv.aprobacion == "APROBADO" and inv.cupo_aprobado > 0:
+            s.emitir(db, inv, "qr", renovar=True)
+    db.commit()
+    return s.resumen_inv(inv)
 
 
 @router.put("/{slug}/lista/{inv_id}")
@@ -772,12 +804,42 @@ def portal(
     usuario: User | None = OPCIONAL,
 ):
     s.limitar(db, "portal:" + ip(request), 120, 60)
-    return acceso_portal(db, slug, data, usuario=usuario)
+    return acceso_confirmacion(db, slug, data, usuario=usuario)
+
+
+@router.post("/{slug}/mis-invitaciones")
+def mis_invitaciones(slug: str, db: Session = DB, usuario: User = USUARIO):
+    evento = db.scalar(select(Evento).where(Evento.slug == slug, Evento.activo.is_(True),
+                                            Evento.estado != EventoEstado.BORRADOR))
+    if evento is None:
+        raise HTTPException(404, "Evento no encontrado")
+    cfg = s.configuracion(db, evento)
+    if not cfg["activo"]:
+        return {"invitaciones": []}
+    email = usuario._email_google_sesion.strip().lower()
+    invitaciones = db.scalars(select(Invitacion).where(Invitacion.evento_id == evento.id,
+        Invitacion.activo.is_(True), or_(Invitacion.usuario_id == usuario.id,
+            and_(Invitacion.usuario_id.is_(None), func.lower(func.trim(Invitacion.email)) == email)),
+        Invitacion.aprobacion.notin_(["REVOCADO", "RECHAZADO"]),
+        Invitacion.rsvp.notin_(["RECHAZADO", "CANCELADO"])).order_by(Invitacion.id)).all()
+    resultado = [{"id": inv.id, "nombre": inv.nombre, "apellido": inv.apellido,
+                  "token": s.emitir(db, inv, "enlace")} for inv in invitaciones]
+    db.commit()
+    return {"invitaciones": resultado}
+
+
+@router.post("/{slug}/portal/confirmar")
+def confirmar_nominal(slug: str, data: PortalConfirmacion, request: Request,
+                      db: Session = DB, usuario: User | None = OPCIONAL):
+    s.limitar(db, "rsvp:" + ip(request), 30, 60)
+    resultado, evento, inv = confirmar_personas(db, slug, data, usuario)
+    resultado["correo_qr"] = notificar_qr(db, evento, inv)
+    return resultado
 
 
 @router.post("/{slug}/portal/codigo")
 def otp(slug: str, data: PortalAcceso, request: Request, db: Session = DB):
-    return enviar_codigo(db, slug, data, ip(request))
+    raise HTTPException(403, "El ingreso de invitados se verifica con el selector de cuentas de Google")
 
 
 @router.post("/{slug}/portal/validar")
@@ -788,7 +850,8 @@ def validar(
     db: Session = DB,
     usuario: User | None = OPCIONAL,
 ):
-    return validar_acceso(db, slug, data, ip(request), usuario=usuario)
+    s.limitar(db, "validar-enlace:" + s.digest(data.token), 10, 600)
+    return acceso_confirmacion(db, slug, data, exigir=True, usuario=usuario)
 
 
 @router.post("/{slug}/portal/rsvp")
@@ -796,11 +859,11 @@ def confirmar(
     slug: str, data: PortalRSVP, request: Request, db: Session = DB, usuario: User | None = OPCIONAL
 ):
     s.limitar(db, "rsvp:" + ip(request), 30, 60)
-    acceso_portal(db, slug, data, True, True, usuario=usuario)
+    acceso_confirmacion(db, slug, data, True, True, usuario=usuario)
     inv, enlace, evento, cfg = resolver_portal(db, slug, data, True)
     s.aplicar_rsvp(db, evento, inv, data.rsvp)
     db.commit()
-    resultado = acceso_portal(db, slug, data, True, usuario=usuario)
+    resultado = acceso_confirmacion(db, slug, data, usuario=usuario)
     resultado["correo_qr"] = notificar_qr(db, evento, inv)
     return resultado
 
@@ -814,7 +877,7 @@ def imagen_qr(
     usuario: User | None = OPCIONAL,
 ):
     s.limitar(db, "imagen-qr:" + ip(request), 30, 60)
-    resultado = acceso_portal(db, slug, data, True, usuario=usuario)
+    resultado = acceso_confirmacion(db, slug, data, True, usuario=usuario)
     if not resultado["qr"]:
         raise HTTPException(409, "La credencial no esta aprobada o fue revocada")
     return descarga(qr_png(resultado["qr"]), "credencial.png", "image/png")

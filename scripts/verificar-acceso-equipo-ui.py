@@ -11,7 +11,7 @@ def main():
             for anterior in (True,False):
                 for autorizado in (True,False):
                     llamadas=[]
-                    opciones=[dict(path="/e/prueba", token="cuenta-evento", cuenta_id=2)]
+                    opciones=[dict(path="/prueba", token="cuenta-evento", cuenta_id=2)]
                     permisos=["ver_invitados","editar_invitados","distribuir"] if autorizado else []
                     def api(route):
                         url=route.request.url.split('?')[0]
@@ -37,13 +37,13 @@ def main():
                         window.google={accounts:{id:{initialize(o){window.credencial=o.callback;},renderButton(el){let b=document.createElement('button'); b.textContent='Elegir cuenta de Google'; b.onclick=()=>window.credencial({credential:'google-verificado'}); el.appendChild(b);}}}};
                     """))
                     page=context.new_page()
-                    page.goto('http://localhost:5179/e/prueba/'+('i/'+'t'*43 if anterior else 'acceso-equipo'))
+                    page.goto('http://localhost:5179/prueba/'+('i/'+'t'*43 if anterior else 'acceso-equipo'))
                     expect(page.get_by_role('heading',name='Ingresar como Agasajado o Administrador')).to_be_visible()
                     expect(page.get_by_role('button',name='Solicitar codigo por email')).to_have_count(0)
                     expect(page.get_by_role('heading',name='Ingresar y confirmar mi invitacion')).to_have_count(0)
                     page.get_by_role('button',name='Elegir cuenta de Google').click()
                     if autorizado:
-                        expect(page).to_have_url('http://localhost:5179/e/prueba/invitados')
+                        expect(page).to_have_url('http://localhost:5179/prueba/invitados')
                         expect(page.get_by_role('button',name='Agregar invitado individual')).to_be_visible()
                         assert page.evaluate("sessionStorage.getItem('eventos_cuenta_pestana')").find('cuenta-evento')>=0
                     else:

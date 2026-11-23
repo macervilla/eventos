@@ -47,8 +47,9 @@ def test_sesion_del_correo_autorizado_confirma_sin_otp(contexto, monkeypatch):
 
 def test_qr_se_envia_al_aprobar_y_fallo_no_deshace_confirmacion(contexto, monkeypatch):
     client, _, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner)
-    inv = crear(client, owner, email="invitado@example.com")
+    inv = crear(client, owner, email=owner.email)
     token = enlace(client, owner, inv)
     envios = []
     def enviar(*a, **kw):
@@ -119,8 +120,9 @@ def aprobar(client, owner, inv, cupo=3):
 
 def test_flujo_rsvp_aprobacion_qr_ingresos(contexto):
     client, db, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner)
-    inv = crear(client, owner)
+    inv = crear(client, owner, email=owner.email)
     token = enlace(client, owner, inv)
     assert len(token) >= 40 and token not in inv.values()
     c = db.scalar(select(CredencialInvitacion).where(CredencialInvitacion.tipo == "enlace"))
@@ -258,8 +260,9 @@ def test_roles_scopes_aislamiento_y_revocacion(contexto):
 
 def test_modificacion_qr_revocado_y_enlace_rotado(contexto):
     client, db, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner)
-    inv = crear(client, owner)
+    inv = crear(client, owner, email=owner.email)
     token = enlace(client, owner, inv)
     confirmar(client, token, 2)
     aprobar(client, owner, inv, 2)
@@ -289,46 +292,22 @@ def test_modificacion_qr_revocado_y_enlace_rotado(contexto):
     )
 
 
-def test_otp_real_no_simulado_intentos_y_uso_unico(contexto, monkeypatch):
+def test_codigo_de_correo_no_sustituye_google(contexto, monkeypatch):
+    from app.models.usuarios import User
     client, db, _, owner, _ = contexto
     habilitar(client, owner, validacion="email", otp_intentos=2)
     inv = crear(client, owner, email="titular@example.com")
     token = enlace(client, owner, inv)
-    assert not client.post("/invitados/prueba/portal", json={"token": token}).json()["validado"]
-    assert confirmar(client, token).status_code == 401
     capturados = []
-    monkeypatch.setattr(
-        "app.services.invitados_portal._send_email", lambda *args: capturados.append(args)
-    )
-    assert (
-        client.post(
-            "/invitados/prueba/portal/codigo", json={"token": token, "email": "otra@example.com"}
-        ).status_code
-        == 400
-    )
-    assert (
-        client.post(
-            "/invitados/prueba/portal/codigo", json={"token": token, "email": "titular@example.com"}
-        ).status_code
-        == 200
-    )
-    codigo = capturados[0][3].split(": ")[1]
-    assert codigo not in client.post("/invitados/prueba/portal", json={"token": token}).text
-    assert (
-        client.post(
-            "/invitados/prueba/portal/validar", json={"token": token, "codigo": "xxxxxx"}
-        ).status_code
-        == 401
-    )
-    r = client.post("/invitados/prueba/portal/validar", json={"token": token, "codigo": codigo})
-    assert r.status_code == 200 and r.json()["validado"]
-    assert confirmar(client, token, sesion=r.json()["sesion"]).status_code == 200
-    assert (
-        client.post(
-            "/invitados/prueba/portal/validar", json={"token": token, "codigo": codigo}
-        ).status_code
-        == 401
-    )
+    monkeypatch.setattr("app.services.invitados_portal._send_email", lambda *args: capturados.append(args))
+    base = "/invitados/prueba/portal"
+    assert not client.post(base, json={"token": token}).json()["validado"]
+    assert client.post(base + "/codigo", json={"token": token, "email": "titular@example.com"}).status_code == 403
+    assert client.post(base + "/validar", json={"token": token, "codigo": "123456"}).status_code == 401
+    assert confirmar(client, token).status_code == 401
+    assert not capturados
+    cuenta = User(email="titular@example.com"); db.add(cuenta); db.commit()
+    assert client.post(base + "/validar", headers=auth(cuenta), json={"token": token}).json()["validado"]
 
 
 def test_importacion_preview_idempotencia_exportacion(contexto):
@@ -373,6 +352,10 @@ def test_importacion_preview_idempotencia_exportacion(contexto):
 
 
 def test_distribucion_smtp_y_canales_manuales(contexto, monkeypatch):
+    from app.core.config import settings
+    from urllib.parse import unquote
+
+    monkeypatch.setattr(settings, "frontend_public_url", "https://example.com/eventos")
     client, _, _, owner, _ = contexto
     habilitar(client, owner)
     inv = crear(client, owner, email="ana@example.com", whatsapp="+5492966123456")
@@ -381,6 +364,8 @@ def test_distribucion_smtp_y_canales_manuales(contexto, monkeypatch):
         "resultados"
     ][0]
     assert resultado["estado"] == "PREPARADO" and "wa.me" in resultado["url_canal"]
+    assert resultado["enlace"].startswith("https://example.com/eventos/prueba/i/")
+    assert resultado["enlace"] in unquote(resultado["url_canal"])
     envios = []
     monkeypatch.setattr(
         "app.services.invitados_distribucion._send_email", lambda *args, **kw: envios.append(args)
@@ -396,6 +381,10 @@ def test_distribucion_smtp_y_canales_manuales(contexto, monkeypatch):
         "resultados"
     ][0]["reintento"]
     assert len(envios) == 1
+    html, mensaje = envios[0][2:4]
+    enlace = mensaje.splitlines()[-1]
+    assert enlace.startswith("https://example.com/eventos/prueba/i/")
+    assert html.index("<img ") < html.index(f'<a href="{enlace}">Confirmar asistencia</a>')
 
     def falla(*args, **kw):
         raise RuntimeError("SMTP no disponible")
@@ -412,8 +401,9 @@ def test_distribucion_smtp_y_canales_manuales(contexto, monkeypatch):
 
 def test_aprobacion_automatica_y_og_sin_datos_privados(contexto):
     client, _, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner, aprobacion="automatica")
-    inv = crear(client, owner)
+    inv = crear(client, owner, email=owner.email)
     token = enlace(client, owner, inv)
     r = confirmar(client, token, 2, ["Sofia"])
     assert r.status_code == 200 and r.json()["cupo_aprobado"] == 3 and r.json()["qr"]
@@ -432,8 +422,9 @@ def test_aprobacion_automatica_y_og_sin_datos_privados(contexto):
 
 def test_qr_vencido_revocado_y_correcciones_auditadas(contexto):
     client, db, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner, aprobacion="automatica")
-    inv = crear(client, owner)
+    inv = crear(client, owner, email=owner.email)
     link = enlace(client, owner, inv)
     qr = confirmar(client, link, 3).json()["qr"]
     key = secrets.token_urlsafe(24)
@@ -495,75 +486,33 @@ def test_qr_vencido_revocado_y_correcciones_auditadas(contexto):
     )
 
 
-def test_pin_cambio_metodo_y_limite_de_intentos(contexto):
+def test_pin_no_acredita_email_y_limite_de_intentos(contexto):
     client, _, _, owner, _ = contexto
-    habilitar(client, owner)
-    inv = crear(client, owner)
+    habilitar(client, owner, validacion="pin")
+    inv = crear(client, owner, email=owner.email)
     token = enlace(client, owner, inv)
-    sesion = client.post("/invitados/prueba/portal", json={"token": token}).json()["sesion"]
-    habilitar(client, owner, pin_acceso="123456")
-    assert not client.post(
-        "/invitados/prueba/portal", json={"token": token, "sesion": sesion}
-    ).json()["validado"]
-    assert (
-        client.post(
-            "/invitados/prueba/portal/validar", json={"token": token, "pin": "xxxx"}
-        ).status_code
-        == 401
-    )
-    personal = client.post(f"/invitados/prueba/lista/{inv['id']}/pin-personal", headers=auth(owner), json={"canal":"presencial"}).json()["pin"]
-    valido = client.post(
-        "/invitados/prueba/portal/validar", json={"token": token, "pin": "123456"}
-    ).json()
-    assert "validado" not in valido  # El PIN compartido anterior ya no valida identidad.
-    valido = client.post("/invitados/prueba/portal/validar", json={"token": token, "pin": personal}).json()
-    assert valido["validado"]
-    habilitar(client, owner, validacion="email", quitar_pin=True)
-    assert confirmar(client, token, sesion=valido["sesion"]).status_code == 401
+    pin = client.post(f"/invitados/prueba/lista/{inv['id']}/pin-personal", headers=auth(owner), json={"canal":"presencial"}).json()["pin"]
+    assert client.post("/invitados/prueba/portal/validar", json={"token": token, "pin": pin}).status_code == 401
+    assert not client.post("/invitados/prueba/portal", json={"token": token}).json()["validado"]
     for _ in range(10):
         client.post("/invitados/prueba/portal/validar", json={"token": token, "codigo": "xxxx"})
-    assert (
-        client.post(
-            "/invitados/prueba/portal/validar", json={"token": token, "codigo": "xxxx"}
-        ).status_code
-        == 429
-    )
+    assert client.post("/invitados/prueba/portal/validar", json={"token": token, "codigo": "xxxx"}).status_code == 429
 
 
-def test_otp_vencido_y_proveedor_no_configurado(contexto, monkeypatch, capsys):
+def test_google_no_depende_de_proveedor_telefonico_ni_smtp(contexto, monkeypatch, capsys):
     client, db, _, owner, _ = contexto
-    habilitar(client, owner, validacion="email", otp_intentos=1)
-    inv = crear(client, owner, email="ana@example.com", telefono="+54 9 2966 123456")
+    habilitar(client, owner, validacion="telefono", otp_intentos=1)
+    inv = crear(client, owner, email=owner.email, telefono="+54 9 2966 123456")
     token = enlace(client, owner, inv)
-    monkeypatch.setattr("app.services.invitados_portal._send_email", lambda *a: None)
-    assert (
-        client.post(
-            "/invitados/prueba/portal/codigo", json={"token": token, "email": "ana@example.com"}
-        ).status_code
-        == 200
-    )
-    otp = db.scalar(select(ValidacionInvitado))
-    otp.vence_at = ahora() - timedelta(seconds=1)
-    db.commit()
-    assert (
-        client.post(
-            "/invitados/prueba/portal/validar", json={"token": token, "codigo": "123456"}
-        ).status_code
-        == 401
-    )
-    habilitar(client, owner, validacion="telefono")
-    assert (
-        client.post(
-            "/invitados/prueba/portal/codigo", json={"token": token, "email": "ana@example.com"}
-        ).status_code
-        == 503
-    )
+    def prohibido(*a, **kw):
+        raise AssertionError("No se debe pedir un codigo")
+    monkeypatch.setattr("app.services.invitados_portal._send_email", prohibido)
+    monkeypatch.setattr("app.services.verificacion_telefono.enviar", prohibido)
+    assert client.post("/invitados/prueba/portal", headers=auth(owner), json={"token": token}).json()["validado"]
     from app.core.config import settings
     from app.services.email import _send_email
-
-    monkeypatch.setattr(settings, "smtp_host", None)
     from fastapi import HTTPException
-
+    monkeypatch.setattr(settings, "smtp_host", None)
     with pytest.raises(HTTPException) as error:
         _send_email("ana@example.com", "Codigo", "secreto-123456", "secreto-123456")
     assert error.value.status_code == 503 and "secreto-123456" not in capsys.readouterr().out
@@ -573,11 +522,12 @@ def test_actualizacion_excel_preserva_rsvp_y_no_acepta_formulas(contexto):
     from openpyxl import Workbook, load_workbook
 
     client, _, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner, aprobacion="automatica")
-    inv = crear(client, owner, nombre="Ana", email="ana@example.com")
+    inv = crear(client, owner, nombre="Ana", email=owner.email)
     token = enlace(client, owner, inv)
     confirmar(client, token, 2, ["Sofia"])
-    archivo = excel([["Ana", "", "ana@example.com", None, None, "Familia nueva", None, 1]])
+    archivo = excel([["Ana", "", owner.email, None, None, "Familia nueva", None, 1]])
     pre = client.post(
         "/invitados/prueba/importar/preview?actualizar=true",
         headers=auth(owner),
@@ -608,8 +558,9 @@ def test_actualizacion_excel_preserva_rsvp_y_no_acepta_formulas(contexto):
 
 def test_canales_deshabilitados_cancelacion_y_cierre(contexto):
     client, _, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner, aprobacion="automatica", canales=["enlace"])
-    inv = crear(client, owner)
+    inv = crear(client, owner, email=owner.email)
     token = enlace(client, owner, inv)
     assert (
         client.post(
@@ -683,7 +634,7 @@ def test_privacidad_logs_y_og_https(contexto, monkeypatch):
         "",
         1,
         '%s - "%s %s HTTP/%s" %s',
-        ("cliente", "GET", "/e/prueba/i/token-privado?enlace=jwt-privado", "1.1", 200),
+        ("cliente", "GET", "/prueba/i/token-privado?enlace=jwt-privado", "1.1", 200),
         None,
     )
     OcultarCredenciales().filter(record)
@@ -759,8 +710,9 @@ def test_validacion_contenido_de_imagen_y_path_seguro(contexto, monkeypatch, tmp
 
 def test_descargar_o_reenviar_no_reactiva_qr_revocado(contexto):
     client, _, _, owner, _ = contexto
+    client.headers.update(auth(owner))
     habilitar(client, owner, aprobacion="automatica")
-    inv = crear(client, owner)
+    inv = crear(client, owner, email=owner.email)
     token = enlace(client, owner, inv)
     assert confirmar(client, token, 1).json()["qr"]
     client.post(f"/invitados/prueba/lista/{inv['id']}/credencial/qr/revocar", headers=auth(owner))
@@ -834,32 +786,22 @@ def test_asignar_varios_agasajados_y_compartir_portada(contexto):
         assert compartido["enlace"] in compartido["mensaje"]
 
 
-def test_receptor_debe_ingresar_antes_de_confirmar_por_defecto(contexto, monkeypatch):
-    client, _, _, owner, _ = contexto
+def test_receptor_debe_ingresar_con_google_antes_de_confirmar(contexto, monkeypatch):
+    from app.models.usuarios import User
+    client, db, _, owner, _ = contexto
     r = client.put("/invitados/prueba/config", headers=auth(owner), json={"activo": True})
-    assert r.status_code == 200 and r.json()["requiere_login"] and r.json()["validacion"] == "email"
+    assert r.status_code == 200 and r.json()["requiere_login"]
     inv = crear(client, owner, email="receptor@example.com")
     token = enlace(client, owner, inv)
-    inicial = client.post("/invitados/prueba/portal", json={"token": token}).json()
-    assert not inicial["validado"] and "nombre" not in inicial
-    assert confirmar(client, token).status_code == 401
-    enviados = []
-    monkeypatch.setattr(
-        "app.services.invitados_portal._send_email", lambda *args: enviados.append(args)
-    )
-    assert (
-        client.post(
-            "/invitados/prueba/portal/codigo",
-            json={"token": token, "email": "receptor@example.com"},
-        ).status_code
-        == 200
-    )
-    codigo = enviados[0][3].split(": ")[1]
-    acceso = client.post(
-        "/invitados/prueba/portal/validar", json={"token": token, "codigo": codigo}
-    ).json()
-    assert acceso["validado"] and acceso["sesion"]
-    assert confirmar(client, token, sesion=acceso["sesion"]).status_code == 200
+    base = "/invitados/prueba/portal"
+    assert not client.post(base, json={"token": token}).json()["validado"]
+    assert client.post(base + "/codigo", json={"token": token}).status_code == 403
+    cuenta = User(email="receptor@example.com"); db.add(cuenta); db.commit()
+    acceso = client.post(base, headers=auth(cuenta), json={"token": token}).json()
+    assert acceso["validado"] and acceso["validacion"] == "google"
+    assert confirmar(client, token, sesion=acceso["sesion"]).status_code == 401
+    client.headers.update(auth(cuenta))
+    assert confirmar(client, token).status_code == 200
 
 
 def test_abm_contactos_sociales_sin_email_y_excel(contexto):

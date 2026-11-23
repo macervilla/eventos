@@ -62,7 +62,7 @@ def test_lote_invalido_no_bloquea_validos_y_whatsapp_tiene_prioridad(contexto):
     assert all(r["reintento"] for r in repetido)
 
 
-def test_reenviar_conserva_enlace_personal_y_foto(contexto):
+def test_reenviar_renueva_enlace_personal_y_conserva_foto(contexto):
     client, _, _, owner, _ = contexto
     habilitar(client, owner)
     inv = crear(client, owner, nombre="Ana", whatsapp="+5492966123456")
@@ -72,6 +72,6 @@ def test_reenviar_conserva_enlace_personal_y_foto(contexto):
             "ids": [inv["id"]], "canal": "whatsapp", "idempotencia": secrets.token_urlsafe(24)})
         assert r.status_code == 200
         resultados.append(r.json()["resultados"][0])
-    assert resultados[0]["enlace"] == resultados[1]["enlace"]
+    assert resultados[0]["enlace"] != resultados[1]["enlace"]
     assert resultados[0]["portada_url"] == resultados[1]["portada_url"]
-    assert resultados[0]["mensaje"] == resultados[1]["mensaje"]
+    assert resultados[0]["mensaje"].replace(resultados[0]["enlace"], "") == resultados[1]["mensaje"].replace(resultados[1]["enlace"], "")

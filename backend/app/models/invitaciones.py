@@ -4,7 +4,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.models.enums import EstadoConfirmacion
-from app.models.mixins import TimestampMixin
+from app.models.mixins import SoftDeleteMixin, TimestampMixin
 
 
 class Invitacion(TimestampMixin, Base):
@@ -50,7 +50,8 @@ class Invitacion(TimestampMixin, Base):
     rsvp: Mapped[str] = mapped_column(String(30), default="PENDIENTE", nullable=False)
     aprobacion: Mapped[str] = mapped_column(String(30), default="PENDIENTE", nullable=False)
     confirmado_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    participantes: Mapped[list["Participante"]] = relationship(back_populates="invitacion")
+    fotos_bloqueadas: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    participantes: Mapped[list["Participante"]] = relationship(back_populates="invitacion", order_by="Participante.id")
 
     evento = relationship("Evento")
     usuario = relationship("User", foreign_keys=[usuario_id])
@@ -62,6 +63,7 @@ class Participante(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     invitacion_id: Mapped[int] = mapped_column(ForeignKey("invitaciones.id", ondelete="CASCADE"), index=True)
     nombre: Mapped[str] = mapped_column(String(160), nullable=False)
+    apellido: Mapped[str] = mapped_column(String(160), default="", server_default="", nullable=False)
     tipo: Mapped[str | None] = mapped_column(String(80))
     edad_opcional: Mapped[int | None] = mapped_column(Integer)
     menu: Mapped[str | None] = mapped_column(String(120))
@@ -70,6 +72,22 @@ class Participante(TimestampMixin, Base):
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     invitacion = relationship("Invitacion", back_populates="participantes")
+
+
+class FotoInvitado(SoftDeleteMixin, TimestampMixin, Base):
+    __tablename__ = "fotos_invitado"
+    __table_args__ = (
+        CheckConstraint("slot >= 1 AND slot <= 4", name="ck_foto_invitado_slot"),
+        Index("uq_foto_invitado_slot_activo", "invitacion_id", "slot", unique=True,
+              postgresql_where=text("activo = true"), sqlite_where=text("activo = 1")),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invitacion_id: Mapped[int] = mapped_column(ForeignKey("invitaciones.id"), index=True)
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    nombre_archivo: Mapped[str] = mapped_column(String(160), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class CredencialInvitacion(TimestampMixin, Base):

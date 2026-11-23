@@ -44,7 +44,7 @@ def main():
                 context=browser.new_context(viewport={'width':ancho,'height':858})
                 context.route('**/api-vps/**',api)
                 page=context.new_page()
-                url='http://localhost:5179/e/prueba/i/'+'t'*43
+                url='http://localhost:5179/prueba/i/'+'t'*43
                 page.goto(url)
                 expect(page.get_by_role('heading',name='Nuestra fiesta',exact=True)).to_be_visible()
                 expect(page.get_by_role('button',name='Guardar mi respuesta',exact=True)).to_have_count(0)

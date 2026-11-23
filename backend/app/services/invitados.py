@@ -165,9 +165,11 @@ def resumen_inv(inv, personales=True):
         "adultos": inv.adultos,
         "menores": inv.menores,
         "confirmado_at": inv.confirmado_at,
+        "requiere_revision_duplicado": bool(getattr(inv, "_requiere_revision_duplicado", False)),
     }
     if personales:
         data.update(
+            cuenta_email=inv.usuario.email if inv.usuario else None,
             email=inv.email,
             telefono=inv.telefono,
             instagram=inv.instagram,
@@ -176,11 +178,20 @@ def resumen_inv(inv, personales=True):
             telegram=inv.telegram,
             otro_contacto=inv.otro_contacto,
             nombres_menores=[p.nombre for p in inv.participantes if p.activo and p.tipo == "MENOR"],
+            acompanantes=[{"nombre": p.nombre, "apellido": p.apellido, "tipo": p.tipo or "ADULTO"}
+                          for p in inv.participantes if p.activo],
         )
     return data
 
 
 def guardar_invitado(db, ctx, data: InvitadoDatos, inv=None):
+    from app.services.coincidencias_invitados import buscar, email_normalizado, telefono_normalizado, telefono_con_identidad_verificada
+
+    # Serializa con las solicitudes y sus aprobaciones, incluso desde Excel.
+    db.scalar(select(Evento).where(Evento.id == ctx.evento.id).with_for_update())
+    data = data.model_copy(update={"nombre": " ".join(data.nombre.split()),
+        "apellido": " ".join(data.apellido.split()),
+        "email": email_normalizado(data.email) or None})
     responsable = data.responsable_id or (inv.responsable_id if inv else ctx.usuario.id)
     if ctx.propio and responsable != ctx.usuario.id:
         raise HTTPException(403, "Solo podes gestionar tu propia lista")
@@ -192,7 +203,27 @@ def guardar_invitado(db, ctx, data: InvitadoDatos, inv=None):
         )
         if asignado is None:
             raise HTTPException(422, "El responsable debe estar asignado a este evento")
-    clave = clave_duplicado(data)
+    identidades, contactos, nombres = buscar(db, ctx.evento, data.nombre, data.apellido,
+        data.email, data.telefono or data.whatsapp, excluir=inv.id if inv else None)
+    if data.whatsapp and data.telefono:
+        _, otros_contactos, _ = buscar(db, ctx.evento, data.nombre, data.apellido,
+            telefono=data.whatsapp, excluir=inv.id if inv else None)
+        contactos = list({i.id: i for i in contactos + otros_contactos}.values())
+    if identidades:
+        raise HTTPException(409, "Ya existe un invitado con ese correo en el evento")
+    if any(telefono_con_identidad_verificada(db, ctx.evento, contactos, telefono_normalizado(n, ctx.evento))
+           for n in (data.telefono, data.whatsapp) if n):
+        raise HTTPException(409, "El telefono coincide con otra identidad verificada; revisa el invitado existente")
+    if not data.email and any(not i.email for i in contactos):
+        raise HTTPException(409, "Ya existe un invitado con ese telefono; revisa el registro existente")
+    from app.models.solicitudes_invitacion import SolicitudInvitacion
+    pendientes = list(db.scalars(select(SolicitudInvitacion).where(
+        SolicitudInvitacion.evento_id == ctx.evento.id, SolicitudInvitacion.estado == "PENDIENTE",
+        SolicitudInvitacion.email_verificado == str(data.email or "")))) if inv is None else []
+    # La clave de telefonos usa E.164 cuando es posible; conservar el texto
+    # de contacto original evita cambiar su presentacion o sus otros usos.
+    numero = telefono_normalizado(data.telefono, ctx.evento)
+    clave = clave_duplicado(data.model_copy(update={"telefono": numero})) if numero else clave_duplicado(data)
     duplicado = db.scalar(
         select(Invitacion.id).where(
             Invitacion.evento_id == ctx.evento.id, Invitacion.clave_duplicado == clave
@@ -216,6 +247,13 @@ def guardar_invitado(db, ctx, data: InvitadoDatos, inv=None):
         clave,
     )
     db.flush()
+    if nuevo and (contactos or nombres):
+        s_ids = sorted({i.id for i in contactos + nombres})
+        auditar(db, ctx.evento.id, "posible_duplicado", ctx.usuario.id, inv.id, coincidencias=s_ids)
+    if nuevo and pendientes:
+        auditar(db, ctx.evento.id, "alta_con_solicitud_pendiente", ctx.usuario.id, inv.id,
+                solicitudes=[p.id for p in pendientes])
+    inv._requiere_revision_duplicado = bool(nuevo and (contactos or nombres))
     auditar(db, ctx.evento.id, "alta" if nuevo else "edicion", ctx.usuario.id, inv.id)
     return inv
 

@@ -78,7 +78,7 @@ def crear_evento_endpoint(data: EventoCreate, db: Session = Depends(get_db),
     evento, propietario = crear_evento(db, data, usuario)
     error_correo = None
     try:
-        enviada = enviar_bienvenida_una_vez(db, propietario, f"/e/{evento.slug}")
+        enviada = enviar_bienvenida_una_vez(db, propietario, f"/{evento.slug}")
     except HTTPException as exc:
         if exc.status_code != 503:
             raise

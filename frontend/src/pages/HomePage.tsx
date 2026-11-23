@@ -232,7 +232,7 @@ export function HomePage() {
           <p>
             Publica imagenes, descripcion, servicios, ubicacion, contacto y redes. Tu negocio puede
             aparecer en busquedas por cercania y tener una URL propia como
-            <strong> eventos.app/p/salon-del-lago</strong>.
+            <strong> acersistemas.site/eventos/salon-del-lago</strong>.
           </p>
           <p className="domain-note">Preparado para futuros dominios como www.salondellago.com.</p>
           <Link className="secondary-link warm-secondary" to="/proveedores/nuevo">

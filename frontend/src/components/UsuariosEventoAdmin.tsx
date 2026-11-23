@@ -14,6 +14,9 @@ const ROLES: Record<string, string> = {
 };
 function mensajeError(err: unknown) {
   const detalle = axios.isAxiosError(err) ? err.response?.data?.detail : null;
+  if (axios.isAxiosError(err) && err.response?.status === 404 && detalle === "Not Found") {
+    return "La gestion de usuarios del evento todavia no esta disponible en el servidor. Actualiza el backend del VPS y luego reintenta. Las asignaciones existentes se conservan.";
+  }
   return typeof detalle === "string" ? detalle : "No se pudo completar la operacion. Intenta nuevamente.";
 }
 
@@ -21,6 +24,7 @@ export function UsuariosEventoAdmin({ evento, alCerrar, alCambiar }: {
   evento: { id: number; nombre: string }; alCerrar: () => void; alCambiar: () => void;
 }) {
   const [datos, setDatos] = useState<Asignaciones | null>(null);
+  const [intento, setIntento] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -45,7 +49,7 @@ export function UsuariosEventoAdmin({ evento, alCerrar, alCambiar }: {
     api.get<Asignaciones>(base, { signal: abortar.signal }).then(r => setDatos(r.data))
       .catch(err => { if (!abortar.signal.aborted) setError(mensajeError(err)); });
     return () => abortar.abort();
-  }, [base]);
+  }, [base, intento]);
 
   useEffect(() => {
     const abortar = new AbortController();
@@ -103,6 +107,7 @@ export function UsuariosEventoAdmin({ evento, alCerrar, alCambiar }: {
           {aviso && <p className="success-inline" role="status">{aviso}</p>}
         </div>
         {!datos && !error && <p role="status">Cargando asignaciones...</p>}
+        {!datos && error && <button className="secondary-button" onClick={() => { setError(null); setIntento(n => n + 1); }}>Reintentar</button>}
         {datos && <>
           <h3>Cuentas con asignaciones o acceso global</h3>
           <ul className="admin-assigned-users">

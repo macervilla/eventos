@@ -55,7 +55,7 @@ def main():
             context.route("http://localhost:8009/**", api)
             context.route("**/media/prueba.jpg", lambda r: r.fulfill(content_type="image/svg+xml", body='<svg xmlns="http://www.w3.org/2000/svg" width="360" height="240"><rect width="360" height="240" fill="#245c48"/><text x="40" y="120" fill="white">Foto invitacion</text></svg>'))
             page = context.new_page()
-            page.goto("http://localhost:5179/e/prueba/invitados", wait_until="domcontentloaded")
+            page.goto("http://localhost:5179/prueba/invitados", wait_until="domcontentloaded")
             expect(page.get_by_role("combobox", name="Canal para distribuir")).to_have_value("whatsapp")
             page.get_by_role("button", name="Enviar invitacion", exact=True).click()
             dialog = page.get_by_role("dialog", name="Enviar invitacion a Ana")

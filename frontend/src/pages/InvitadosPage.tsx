@@ -1,12 +1,18 @@
 import { useConfirmacion } from "../components/useConfirmacion";
+import { SolicitudesInvitacionPanel } from "../components/SolicitudesInvitacionPanel";
 import axios from "axios";
 import { X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useHref, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { abrirPestanaConSesion } from "../api/sesion";
 import { Ventana } from "../components/Ventana";
+import { FotosInvitado } from "../components/FotosInvitado";
+import { ControlVideoAdmin, EstadoVideo, HabilitarTransmisor } from "../components/VideoEvento";
 
 export type Invitado = {
+  cuenta_email?: string | null;
+  requiere_revision_duplicado?: boolean;
   id: number; nombre: string; apellido: string; email: string | null; telefono: string | null; agregado_por?: string | null;
   whatsapp: string | null; facebook: string | null; telegram: string | null; otro_contacto: string | null;
   instagram: string | null; grupo: string | null; responsable_id: number; cantidad_permitida: number;
@@ -15,7 +21,7 @@ export type Invitado = {
 };
 type AgendaContacto = { name?: string[]; tel?: string[]; email?: string[] };
 type NavegadorContactos = Navigator & { contacts?: { select: (propiedades: string[], opciones: { multiple: boolean }) => Promise<AgendaContacto[]> } };
-type Acceso = { permisos: string[]; solo_responsable: boolean; usuario_id: number; config: Config; roles_disponibles: Record<string, string[]>; agasajado_asignado_por?: string | null };
+type Acceso = { puede_gestionar_solicitudes?: boolean; permisos: string[]; solo_responsable: boolean; usuario_id: number; config: Config; roles_disponibles: Record<string, string[]>; agasajado_asignado_por?: string | null };
 type Config = { activo: boolean; aprobacion: string; validacion: string; permitir_modificaciones: boolean; cierre_rsvp: string | null;
   verificar_invitados: boolean; requiere_login: boolean;
   listas_compartidas: boolean; canales: string[]; otp_minutos: number; otp_intentos: number; tiene_pin?: boolean; pin_acceso?: string | null; quitar_pin?: boolean };
@@ -27,6 +33,18 @@ const etiquetas: Record<string, string> = { ver_invitados: "Consultar invitados 
   distribuir: "Distribuir invitaciones", aprobar: "Aprobar y emitir QR", estadisticas: "Ver estadisticas", confirmar_asistido: "Confirmar en nombre del invitado",
   roles: "Asignar roles", configurar_invitados: "Configurar este modulo", control_ingreso: "Registrar ingresos", ver_asistencia: "Consultar asistencia",
   corregir_ingresos: "Corregir ingresos con auditoria", configurar_evento: "Editar configuracion general del evento" };
+function canalDelInvitado(invitado: Invitado, preferido: string): string | null {
+  const contactos: Record<string, string | null> = {
+    whatsapp: invitado.whatsapp?.trim() || invitado.telefono?.trim() || null,
+    email: invitado.email?.trim() || null,
+    instagram: invitado.instagram?.trim() || null,
+    messenger: invitado.facebook?.trim() || null,
+    telegram: invitado.telegram?.trim() || null,
+  };
+  // El ultimo intento puede haber guardado un canal sin contacto (por ejemplo WhatsApp sin numero).
+  return [invitado.canal, preferido, "whatsapp", "email", "instagram", "messenger", "telegram"]
+    .find((medio): medio is string => Boolean(medio && (medio === "enlace" || contactos[medio]))) || null;
+}
 export function errorMensaje(err: unknown) {
   const detalle = axios.isAxiosError(err) ? err.response?.data?.detail : null;
   return typeof detalle === "string" ? detalle : "No se pudo completar la operacion. Revisa los datos e intenta nuevamente.";
@@ -41,13 +59,17 @@ export async function descargarArchivo(url: string, nombre: string, datos?: unkn
 export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {}) {
   const { confirmar, ventanaConfirmacion } = useConfirmacion();
   const { slug } = useParams(); const navigate = useNavigate();
+  const enlaceAlbum = useHref(`/${slug}/album`);
   const base = `/invitados/${slug}`;
   const [acceso, setAcceso] = useState<Acceso | null>(null);
+  const [estadoVideo, setEstadoVideo] = useState<EstadoVideo | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [lista, setLista] = useState<Invitado[]>([]); const [total, setTotal] = useState(0);
   const [roles, setRoles] = useState<Rol[]>([]); const [kpis, setKpis] = useState<Record<string, number>>({});
   const [rolPorQuitar, setRolPorQuitar] = useState<Rol | null>(null);
   const [pinInvitado, setPinInvitado] = useState<Invitado | null>(null);
+  const [fotosInvitado, setFotosInvitado] = useState<Invitado | null>(null);
+  const [fotosOcupadas, setFotosOcupadas] = useState(false);
   const [pinGenerado, setPinGenerado] = useState<string | null>(null);
   const [entregaPin, setEntregaPin] = useState("presencial");
   const [pagina, setPagina] = useState(0); const [q, setQ] = useState("");
@@ -56,18 +78,23 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
   const [error, setError] = useState<string | null>(null); const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [editor, setEditor] = useState<Invitado | "nuevo" | null>(null);
+  const [cuentaInvitado, setCuentaInvitado] = useState<Invitado | null>(null);
+  const [emailCuenta, setEmailCuenta] = useState("");
   const [form, setForm] = useState({ ...vacio });
+  const [telefonosContacto, setTelefonosContacto] = useState<string[]>([]);
   const [rsvp, setRsvp] = useState<Invitado | null>(null); const [adultos, setAdultos] = useState(1); const [menores, setMenores] = useState("");
   const [aprobar, setAprobar] = useState<Invitado | null>(null); const [cupo, setCupo] = useState(1);
   const [canal, setCanal] = useState("whatsapp"); const [tipo, setTipo] = useState("invitacion");
   const [compartidos, setCompartidos] = useState<{ id: number; estado: string; detalle?: string; mensaje?: string; enlace?: string; url_canal?: string; portada_url?: string; titulo?: string; canal?: string; destinatario?: string; telefono_destino?: string }[]>([]);
   const [ventanaEnvio, setVentanaEnvio] = useState<string | null>(null);
+  const [indiceEnvio, setIndiceEnvio] = useState(0);
   const [emailsAgasajados, setEmailsAgasajados] = useState("");
   const [contactosAgasajados, setContactosAgasajados] = useState<Record<string, ContactoAgasajado>>({});
   const [seleccionandoAgasajados, setSeleccionandoAgasajados] = useState(false);
   const [avisoContactosAgasajados, setAvisoContactosAgasajados] = useState<string | null>(null);
   const [vistaInvitacion, setVistaInvitacion] = useState(false);
   const [fotoEnvio, setFotoEnvio] = useState<File | null>(null);
+  const [fotoEnvioPreview, setFotoEnvioPreview] = useState<string | null>(null);
   const [avisoFoto, setAvisoFoto] = useState<string | null>(null);
   const [compartiendoFoto, setCompartiendoFoto] = useState(false);
   const [portadaPreview, setPortadaPreview] = useState<string | null>(null);
@@ -96,7 +123,7 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
       if (axios.isAxiosError(err) && [401, 403].includes(err.response?.status || 0)) {
         setAcceso(null); setLista([]); setRoles([]); setKpis({}); setEditor(null); setPinInvitado(null); setPinGenerado(null);
       }
-      if (axios.isAxiosError(err) && err.response?.status === 401) navigate(`/ingresar?destino=${encodeURIComponent(`/e/${slug}/invitados`)}`, { replace: true });
+      if (axios.isAxiosError(err) && err.response?.status === 401) navigate(`/ingresar?destino=${encodeURIComponent(`/${slug}/invitados`)}`, { replace: true });
       else setError(errorMensaje(err));
     }
   }, [base, filtros, pagina, navigate, slug]);
@@ -110,6 +137,7 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
   }
   function editar(inv: Invitado | "nuevo") {
     setEditor(inv); setError(null);
+    setTelefonosContacto([]);
     setForm(inv === "nuevo" ? { ...vacio, responsable_id: acceso?.usuario_id || 0 } : {
       nombre: inv.nombre, apellido: inv.apellido, email: inv.email || "", telefono: inv.telefono || "", instagram: inv.instagram || "",
       whatsapp: inv.whatsapp || "", facebook: inv.facebook || "", telegram: inv.telegram || "", otro_contacto: inv.otro_contacto || "",
@@ -125,9 +153,15 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
     try {
       const [contacto] = await agenda.select(["name", "tel", "email"], { multiple: false });
       if (!contacto) return;
+      const telefonos = [...new Set((contacto.tel || []).map(numero => numero.trim()).filter(Boolean))];
+      const telefono = telefonos[0];
+      setTelefonosContacto(telefonos);
       setForm(actual => ({ ...actual, nombre: contacto.name?.[0] || actual.nombre, apellido: contacto.name?.[0] ? "" : actual.apellido,
-        telefono: contacto.tel?.[0] || actual.telefono, email: contacto.email?.[0] || actual.email }));
-      setAviso("Contacto cargado. Revisa los datos y completa WhatsApp o las redes antes de guardar.");
+        telefono: telefono || actual.telefono,
+        whatsapp: telefono && (!actual.whatsapp.trim() || actual.whatsapp === actual.telefono) ? telefono : actual.whatsapp,
+        email: contacto.email?.[0] || actual.email }));
+      setAviso(telefono ? "Contacto cargado. El numero se completa en Telefono y WhatsApp si no habia otro WhatsApp indicado. Revisa los datos antes de guardar."
+        : "El contacto no compartio un numero de telefono. Volve a seleccionarlo incluyendo el telefono, o pegalo en el formulario.");
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError("No se pudo abrir la agenda. Podes completar o pegar el contacto manualmente.");
@@ -155,7 +189,9 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
         const nuevos = { ...actual };
         for (const contacto of contactos) for (const email of contacto.email || []) {
           const clave = email.trim().toLowerCase();
-          if (!nuevos[clave]) nuevos[clave] = { canal: "email", destinatario: contacto.tel?.[0] || "" };
+          const telefono = (contacto.tel || []).map(numero => numero.trim()).find(Boolean) || "";
+          if (!nuevos[clave]) nuevos[clave] = { canal: "email", destinatario: telefono };
+          else if (!nuevos[clave].destinatario && telefono) nuevos[clave] = { ...nuevos[clave], destinatario: telefono };
         }
         return nuevos;
       });
@@ -187,22 +223,35 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
     }, "Vista previa lista. No se envio ninguna invitacion.");
   }
   useEffect(() => () => { if (portadaPreview) URL.revokeObjectURL(portadaPreview); }, [portadaPreview]);
+  useEffect(() => {
+    if (!fotoEnvio) {
+      setFotoEnvioPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(fotoEnvio);
+    setFotoEnvioPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [fotoEnvio]);
 
   async function compartir(ids = seleccion, invitado?: Invitado) {
     const destinatarios = lista.filter(i => ids.includes(i.id));
     if (!destinatarios.length) return;
-    const canales = destinatarios.map(i => i.canal || canal);
-    if (canales.some(c => !acceso?.config.canales.includes(c))) {
+    const canales = destinatarios.map(i => canalDelInvitado(i, canal));
+    if (canales.some(c => !c)) {
+      setError("Hay invitados sin un medio de contacto registrado. Edita sus datos o selecciona el canal enlace para compartir manualmente."); return;
+    }
+    if (canales.some(c => !c || !acceso?.config.canales.includes(c))) {
       setError("El medio del invitado no esta habilitado. Revisa la configuracion de canales."); return;
     }
     const detalle = destinatarios.map((i, n) => `${i.nombre} ${i.apellido}: ${canales[n]}`).join("\n");
     const manual = canales.some(c => c !== "email");
-    const explicacion = manual ? "\n\nLos medios manuales no envian automaticamente. Para WhatsApp podras compartir foto, texto y enlace; elegi el destinatario y pulsa Enviar dentro de WhatsApp." : "";
+    const explicacion = "\n\nSe generara un enlace nuevo y el anterior dejara de funcionar. Se conservan asistencia, cupo y cuenta autorizada."
+      + (manual ? "\n\nLos medios manuales no envian automaticamente. Para WhatsApp podras compartir foto, texto y enlace; elegi el destinatario y pulsa Enviar dentro de WhatsApp." : "");
     if (!canales.every(c => c === "whatsapp") && !await confirmar(`Enviar / reenviar la invitacion por el medio de cada invitado?\n\n${detalle}${explicacion}`, "Reenviar invitacion", canales.length === 1 && canales[0] === "whatsapp" ? "Preparar foto y mensaje" : manual ? "Preparar invitaciones" : "Confirmar envio")) return;
     // Abrir durante el clic evita que el navegador bloquee el canal tras esperar la API.
     const ventana = invitado && canales[0] !== "email" && canales[0] !== "enlace" && canales[0] !== "whatsapp" ? window.open("about:blank", "_blank") : null;
     if (ventana) ventana.opener = null;
-    setCompartidos([]); setVentanaEnvio(null); setFotoEnvio(null); setAvisoFoto(null);
+    setCompartidos([]); setVentanaEnvio(null); setIndiceEnvio(0); setFotoEnvio(null); setAvisoFoto(null);
     setOcupado(true); setError(null); setAviso(null);
     try {
       const resultados: typeof compartidos = [];
@@ -241,27 +290,42 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
     if (acceso && !disponibles.includes(canal)) setCanal(disponibles[0] || "");
   }, [acceso, canal]);
   useEffect(() => { setCompartidos([]); setVentanaEnvio(null); setVistaInvitacion(false); setPortadaPreview(null); setEmailsAgasajados(""); setContactosAgasajados({}); setAvisoContactosAgasajados(null); }, [base]);
-  async function compartirFoto(c: { mensaje?: string; enlace?: string; titulo?: string }) {
-    if (!fotoEnvio || !c.mensaje || compartiendoFoto) return;
-    const texto = c.enlace && !c.mensaje.includes(c.enlace) ? `${c.mensaje}\n\n${c.enlace}` : c.mensaje;
+  const pendientesWhatsApp = compartidos.filter(c => c.estado === "PREPARADO" && c.canal === "whatsapp");
+  const envioActual = pendientesWhatsApp[indiceEnvio];
+  function siguienteDestinatario(id?: number) {
+    const siguiente = pendientesWhatsApp.findIndex(c => c.id === id) + 1;
+    if (siguiente > 0 && siguiente < pendientesWhatsApp.length) setIndiceEnvio(siguiente);
+  }
+  function textoInvitacion({ mensaje, enlace }: { mensaje?: string; enlace?: string }) {
+    if (!enlace) return mensaje?.trim() || "";
+    const texto = mensaje?.split(enlace).join("").trim();
+    return texto ? `${texto}\n${enlace}` : enlace;
+  }
+  async function compartirFoto(c: { id: number; destinatario?: string; mensaje?: string; enlace?: string }) {
+    const texto = textoInvitacion(c);
+    if (!fotoEnvio || !texto || compartiendoFoto) return;
     setCompartiendoFoto(true); setAvisoFoto(null);
     try {
-      await navigator.share({ files: [fotoEnvio], title: c.titulo || "Invitacion", text: texto });
-      setAvisoFoto("Compartido con la aplicacion elegida; entrega no confirmada. Si falta el texto, copialo desde Mas opciones.");
+      await navigator.share({ files: [fotoEnvio], text: texto });
+      setAvisoFoto(pendientesWhatsApp.length > 1
+        ? `Invitacion de ${c.destinatario} compartida con la aplicacion elegida; entrega no confirmada. Podes volver a esa persona desde el selector si necesitas copiar su texto.`
+        : "Compartido con la aplicacion elegida; entrega no confirmada. Si falta el enlace, copia el texto desde Más opciones y pégalo en el pie de foto.");
+      siguienteDestinatario(c.id);
     } catch (err) {
       setAvisoFoto(err instanceof DOMException && err.name === "AbortError"
         ? "Compartir cancelado. Podes volver a intentarlo."
-        : "No se pudo compartir la foto. Descargala y adjuntala en WhatsApp junto al texto y enlace.");
+        : "No se pudo compartir la foto. Descárgala, adjúntala en WhatsApp y pega el texto con el enlace en el pie de foto.");
     } finally { setCompartiendoFoto(false); }
   }
-  function descargarFotoYAbrir(c: { url_canal?: string }) {
+  function descargarFotoYAbrir(c: { id?: number; destinatario?: string; url_canal?: string }) {
     if (!fotoEnvio) return;
     const url = URL.createObjectURL(fotoEnvio);
     const enlace = document.createElement("a");
     enlace.href = url; enlace.download = "invitacion.jpg"; enlace.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     if (c.url_canal) window.open(c.url_canal, "_blank", "noopener,noreferrer");
-    setAvisoFoto("Foto descargada. Adjunta invitacion.jpg en el chat de WhatsApp y pulsa Enviar.");
+    setAvisoFoto(`Foto descargada${pendientesWhatsApp.length > 1 ? ` para ${c.destinatario}` : ""}. Adjunta invitacion.jpg y pega el mensaje con el enlace en el pie de foto antes de enviar.`);
+    siguienteDestinatario(c.id);
   }
   const puedeCompartirFoto = Boolean(fotoEnvio && typeof navigator.share === "function" && navigator.canShare?.({ files: [fotoEnvio] }));
   const avisoUI = <>{error && <p role="alert" className="form-error">{error}</p>}{aviso && <p className="success-inline" role="status">{aviso}</p>}</>;
@@ -270,10 +334,13 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
   const Contenedor = integrado ? "section" : "main";
   return <Contenedor className="invitados-page" id={integrado ? "mis-invitados" : undefined}>
     {ventanaConfirmacion}
-    <header className="invitados-header"><div>{!integrado && <Link to={`/e/${slug}`}>Ver invitacion del evento</Link>}{integrado ? <h2>Mis invitados</h2> : <h1>Gestion de invitados</h1>}<p>Agrega invitados desde tus contactos y consulta quien agrego a cada persona.</p></div>
+    <header className="invitados-header"><div>{!integrado && <Link to={`/${slug}`}>Ver invitacion del evento</Link>}{integrado ? <h2>Mis invitados</h2> : <h1>Gestion de invitados</h1>}<p>Agrega invitados desde tus contactos y consulta quien agrego a cada persona.</p></div>
       <div className="invitados-acciones"><button className="secondary-button" disabled={ocupado} onClick={() => void cargar()}>Actualizar</button>
-      {tiene("control_ingreso") && <Link className="action-button" to={`/e/${slug}/control-ingreso`}>Control de ingreso</Link>}</div></header>
+      {tiene("configurar_invitados") && <button className="secondary-button" onClick={() => { if (!abrirPestanaConSesion(enlaceAlbum)) setError("No se pudo abrir el album. Permiti abrir una nueva pestana y reintenta."); }}>Álbum</button>}
+      {tiene("control_ingreso") && <Link className="action-button" to={`/${slug}/control-ingreso`}>Control de ingreso</Link>}</div></header>
     {avisoUI}
+    {slug && tiene("configurar_invitados") && <ControlVideoAdmin key={slug} slug={slug} alCambiarEstado={setEstadoVideo} />}
+    {slug && acceso?.puede_gestionar_solicitudes && acceso.config.activo && <SolicitudesInvitacionPanel slug={slug} alCambiar={cargar} />}
     {acceso?.agasajado_asignado_por && <p>Te agrego como agasajado: {acceso.agasajado_asignado_por}</p>}
     {!acceso && !error && <p>Cargando permisos...</p>}
     {acceso && !acceso.config.activo && <section className="empty-state"><p>El modulo esta desactivado. Habilitalo para agregar invitados individualmente o importar un Excel.</p>{tiene("configurar_invitados") ? <button className="action-button" disabled={ocupado} onClick={() => void ejecutar(async () => { const { tiene_pin, ...datos } = acceso.config; const r = await api.put(base + "/config", { ...datos, activo: true }); setConfig(r.data); }, "Modulo habilitado. Ya podes gestionar invitados.")}>Habilitar invitados</button> : <p>Un administrador debe habilitarlo para gestionar invitaciones.</p>}</section>}
@@ -318,20 +385,15 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
       })}
     </section>}
     {tiene("configurar_invitados") && config && <details className="invitados-panel" open={!acceso?.config.activo}><summary>Configuracion del modulo</summary>
-      <form className="invitados-form" onSubmit={e => { e.preventDefault(); void ejecutar(async () => { const { tiene_pin, ...datos } = config; const r = await api.put(base + "/config", datos); setConfig(r.data); }); }}>
+      <form className="invitados-form" onSubmit={e => { e.preventDefault(); void ejecutar(async () => { const { tiene_pin, ...datos } = config; const r = await api.put(base + "/config", { ...datos, verificar_invitados: true, requiere_login: true, validacion: "email" }); setConfig(r.data); }); }}>
         <label><input type="checkbox" checked={config.activo} onChange={e => setConfig({ ...config, activo: e.target.checked })} /> Habilitar invitados</label>
         <label>Aprobacion<select value={config.aprobacion} onChange={e => setConfig({ ...config, aprobacion: e.target.value })}><option value="manual">Manual</option><option value="automatica">Automatica</option></select></label>
-        <label><input type="checkbox" checked={config.verificar_invitados} onChange={e => setConfig({ ...config, verificar_invitados: e.target.checked, requiere_login: e.target.checked, validacion: e.target.checked && config.validacion === "enlace" ? "email" : config.validacion })} /> Verificar acceso de cada invitado antes de confirmar</label>
-        <label>Verificacion del invitado<select disabled={!config.verificar_invitados} value={config.validacion} onChange={e => setConfig({ ...config, validacion: e.target.value })}>{config.validacion === "enlace" && <option value="enlace">Sin verificacion adicional</option>}<option value="email">Codigo al email registrado</option><option value="telefono">Codigo al telefono registrado (proveedor oficial)</option><option value="pin">PIN personal por invitacion</option></select></label>
-        <p>El invitado no necesita Google. Los codigos se envian solo al contacto registrado por el organizador. El PIN es individual y se entrega por un canal distinto al enlace.</p>
-        {!config.verificar_invitados && <p>Sin verificacion, cualquier persona que posea el enlace privado podra responder por esa invitacion.</p>}
+        <p><strong>Ingreso con el selector de cuentas de Google.</strong> Cada invitado debe elegir la cuenta autorizada por el administrador o agasajado.</p>
+        <p>La cuenta se verifica en el servidor y solo recibe sus invitaciones y permisos asignados. No se solicitan PIN ni codigos adicionales.</p>
         <label><input type="checkbox" checked={config.permitir_modificaciones} onChange={e => setConfig({ ...config, permitir_modificaciones: e.target.checked })} /> Permitir correcciones RSVP</label>
         <label><input type="checkbox" checked={config.listas_compartidas} onChange={e => setConfig({ ...config, listas_compartidas: e.target.checked })} /> Compartir listas entre responsables</label>
         <fieldset className="invitados-permisos"><legend>Canales habilitados</legend>{["email", "whatsapp", "instagram", "messenger", "telegram", "enlace"].map(c => <label key={c}><input type="checkbox" checked={config.canales?.includes(c) || false} onChange={e => setConfig({ ...config, canales: e.target.checked ? [...config.canales, c] : config.canales.filter(v => v !== c) })} />{c}</label>)}</fieldset>
         <label>Cierre RSVP<input type="datetime-local" value={config.cierre_rsvp ? new Date(new Date(config.cierre_rsvp).getTime() - new Date(config.cierre_rsvp).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ""} onChange={e => setConfig({ ...config, cierre_rsvp: e.target.value ? new Date(e.target.value).toISOString() : null })} /></label>
-        {config.validacion === "pin" && <p>Usa PIN personal en cada invitado para generar su codigo. Un PIN compartido del evento no valida la identidad individual.</p>}
-        <label>Vigencia codigo email (minutos)<input type="number" min={1} max={30} value={config.otp_minutos} onChange={e => setConfig({ ...config, otp_minutos: Number(e.target.value) })} /></label>
-        <label>Intentos de codigo<input type="number" min={1} max={10} value={config.otp_intentos} onChange={e => setConfig({ ...config, otp_intentos: Number(e.target.value) })} /></label>
         <button className="action-button" disabled={ocupado}>Guardar configuracion</button>
       </form>
     </details>}
@@ -374,15 +436,19 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
           <button className="action-button" disabled={ocupado || !seleccion.length} onClick={() => void compartir()}>Enviar / Reenviar seleccion ({seleccion.length})</button></div>}
         <div className="admin-table-wrap"><table className="invitados-tabla"><thead><tr><th>Seleccion</th><th>Invitado / grupo</th><th>RSVP / aprobacion</th><th>Cupos</th><th>Distribucion</th><th>Acciones</th></tr></thead><tbody>
           {lista.map(i => <tr key={i.id}><td><input aria-label={`Seleccionar ${i.nombre}`} type="checkbox" checked={seleccion.includes(i.id)} onChange={e => setSeleccion(e.target.checked ? [...seleccion, i.id].slice(0, 50) : seleccion.filter(id => id !== i.id))} /></td>
-            <td><strong>{i.nombre} {i.apellido}</strong><small>{i.grupo || "Individual"}</small><small>Agregado por: {i.agregado_por || "Sin registro"}</small><small>{[i.email, i.telefono, i.whatsapp && `WhatsApp: ${i.whatsapp}`, i.instagram && `Instagram: ${i.instagram}`, i.facebook && `Facebook: ${i.facebook}`, i.telegram && `Telegram: ${i.telegram}`, i.otro_contacto].filter(Boolean).join(" | ") || "Sin contacto digital"}</small>{i.nombres_menores?.length > 0 && <details><summary>Menores ({i.menores})</summary>{i.nombres_menores.join(", ")}</details>}</td>
+            <td><strong>{i.nombre} {i.apellido}</strong>{i.requiere_revision_duplicado && <small>Posible coincidencia: revisar datos</small>}<small>{i.grupo || "Individual"}</small><small>Agregado por: {i.agregado_por || "Sin registro"}</small><small>{[i.email, i.telefono, i.whatsapp && `WhatsApp: ${i.whatsapp}`, i.instagram && `Instagram: ${i.instagram}`, i.facebook && `Facebook: ${i.facebook}`, i.telegram && `Telegram: ${i.telegram}`, i.otro_contacto].filter(Boolean).join(" | ") || "Sin contacto digital"}</small>{i.nombres_menores?.length > 0 && <details><summary>Menores ({i.menores})</summary>{i.nombres_menores.join(", ")}</details>}</td>
             <td>{i.rsvp}<small>{i.aprobacion}</small></td><td>Maximo: {i.cantidad_permitida}<small>Solicitados: {i.solicitados}</small><small>Aprobados: {i.cupo_aprobado}</small><small>Ingresaron: {i.ingresados}</small></td>
             <td>{i.distribucion === "PREPARADO" ? "Pendiente de envio manual" : i.distribucion}<small>{i.canal}</small></td><td><div className="invitados-acciones">
               {tiene("editar_invitados") && <><button className="secondary-button" onClick={() => editar(i)}>Editar</button><button className="secondary-button" disabled={ocupado} onClick={async () => { if (await confirmar(`${i.activo ? "Dar de baja" : "Reactivar"} a ${i.nombre} ${i.apellido}?`, i.activo ? "Dar de baja invitado" : "Reactivar invitado", i.activo ? "Dar de baja" : "Reactivar")) void ejecutar(() => api.put(`${base}/lista/${i.id}`, { nombre: i.nombre, apellido: i.apellido, email: i.email, telefono: i.telefono, instagram: i.instagram, whatsapp: i.whatsapp, facebook: i.facebook, telegram: i.telegram, otro_contacto: i.otro_contacto, grupo: i.grupo, responsable_id: i.responsable_id, cantidad_permitida: i.cantidad_permitida, activo: !i.activo }), i.activo ? "Invitado dado de baja." : "Invitado reactivado."); }}>{i.activo ? "Dar de baja" : "Reactivar"}</button></>}
-              {tiene("editar_invitados") && <button className="secondary-button" disabled={ocupado} onClick={() => { setPinInvitado(i); setPinGenerado(null); setError(null); }}>PIN personal</button>}
+              {tiene("editar_invitados") && <button className="secondary-button" disabled={ocupado} onClick={() => {
+                setCuentaInvitado(i); setEmailCuenta(i.cuenta_email || i.email || ""); setError(null);
+              }}>{i.cuenta_email ? "Cambiar cuenta vinculada" : "Vincular cuenta Google"}</button>}
+              {tiene("configurar_invitados") && <button className="secondary-button" disabled={ocupado} onClick={() => setFotosInvitado(i)}>Fotos del invitado</button>}
+              {tiene("configurar_invitados") && slug && i.activo && <HabilitarTransmisor slug={slug} invitado={i} estado={estadoVideo} />}
               {tiene("confirmar_asistido") && <button className="secondary-button" onClick={() => { setRsvp(i); setAdultos(i.adultos || 1); setMenores(i.nombres_menores?.join("\n") || ""); }}>Confirmar asistido</button>}
               {tiene("aprobar") && <button className="secondary-button" onClick={() => { setAprobar(i); setCupo(i.solicitados || 1); }}>Aprobacion / QR</button>}
               {tiene("distribuir") && <button className="action-button" disabled={ocupado} onClick={() => void compartir([i.id], i)}>{["PREPARADO", "ENVIADO"].includes(i.distribucion) ? "Reenviar invitacion" : "Enviar invitacion"}</button>}
-              {tiene("distribuir") && <details><summary>Opciones avanzadas del enlace</summary><p>Para repetir la invitacion usa Reenviar. Invalidar el enlace impide usar el anterior.</p><button className="secondary-button" disabled={ocupado} onClick={async () => { if (await confirmar("El enlace anterior dejara de funcionar. Invalidarlo y crear uno nuevo? Para repetir un envio usa Reenviar invitacion.", "Invalidar enlace anterior", "Invalidar y crear enlace")) void ejecutar(() => api.post(`${base}/lista/${i.id}/credencial/enlace/regenerar`), "Enlace anterior invalidado. Usa Enviar o Reenviar invitacion para compartir el nuevo."); }}>Invalidar enlace anterior</button></details>}
+              {tiene("distribuir") && <details><summary>Opciones avanzadas del enlace</summary><p>Reenviar genera un enlace nuevo y conserva asistencia y cupo. Invalidar permite reemplazarlo sin enviar.</p><button className="secondary-button" disabled={ocupado} onClick={async () => { if (await confirmar("El enlace anterior dejara de funcionar. Invalidarlo y crear uno nuevo? Para repetir un envio usa Reenviar invitacion.", "Invalidar enlace anterior", "Invalidar y crear enlace")) void ejecutar(() => api.post(`${base}/lista/${i.id}/credencial/enlace/regenerar`), "Enlace anterior invalidado. Usa Enviar o Reenviar invitacion para compartir el nuevo."); }}>Invalidar enlace anterior</button></details>}
               {tiene("ver_invitados") && <button className="secondary-button" onClick={() => void ejecutar(async () => setHistorial((await api.get(`${base}/historial/${i.id}`)).data), "Historial consultado.")}>Historial</button>}
             </div></td></tr>)}
           {!lista.length && <tr><td colSpan={6}>No hay invitados para estos filtros.</td></tr>}
@@ -395,25 +461,36 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
         {portadaPreview && <img className="invitacion-portada-compartir" src={portadaPreview} alt="Vista previa de la invitacion" />}
         <p>Mensaje: Hola [nombre]! [titulo del evento]. Presiona aqui para confirmar: [enlace personal].</p>
         <div className="invitados-acciones">
-          <Link className="secondary-button" to={`/e/${slug}`}>Ver invitacion completa</Link>
-          {tiene("configurar_evento") && <Link className="action-button" to={`/e/${slug}?editar=1`}>Configurar foto, textos y datos</Link>}
+          <Link className="secondary-button" to={`/${slug}`}>Ver invitacion completa</Link>
+          {tiene("configurar_evento") && <Link className="action-button" to={`/${slug}?editar=1`}>Configurar foto, textos y datos</Link>}
         </div>
         {avisoUI}
       </Ventana>}
       {ventanaEnvio && <Ventana titulo="Enviar invitacion" alCerrar={() => { if (!compartiendoFoto) setVentanaEnvio(null); }}>
-        {compartidos.map((c, n) => <article key={n}>
+        {pendientesWhatsApp.length > 1 && <div className="admin-user-form">
+          <p>Invitacion {indiceEnvio + 1} de {pendientesWhatsApp.length}. Usa el mismo boton para compartir con cada persona; cada una conserva su enlace personal.</p>
+          <label htmlFor="destinatario-reenvio">Destinatario para reenviar</label>
+          <select id="destinatario-reenvio" value={indiceEnvio} disabled={compartiendoFoto} onChange={e => { setIndiceEnvio(Number(e.target.value)); setAvisoFoto(null); }}>
+            {pendientesWhatsApp.map((c, n) => <option key={c.id} value={n}>{c.destinatario}{c.telefono_destino ? ` · ${c.telefono_destino}` : ""}</option>)}
+          </select>
+        </div>}
+        {compartidos.filter(c => c.estado !== "PREPARADO" || c.canal !== "whatsapp" || c === envioActual).map(c => <article key={c.id}>
           <strong>{c.destinatario}</strong>
           {c.telefono_destino && <p>{c.telefono_destino}</p>}
           {c.estado === "PREPARADO" && c.canal === "whatsapp" ? <>
-            <p>{puedeCompartirFoto ? "Elegi WhatsApp y el destinatario para enviar la foto con el mensaje." : "Descarga la foto, adjuntala en el chat y pulsa Enviar."}</p>
+            <div className="invitacion-envio">
+              {fotoEnvioPreview && <img className="invitacion-portada-compartir" src={fotoEnvioPreview} alt="Portada de la invitación" />}
+              {c.enlace && <p><a href={c.enlace} target="_blank" rel="noopener noreferrer">Confirmar asistencia</a></p>}
+            </div>
+            <p>{puedeCompartirFoto ? "Elegí WhatsApp y comprobá que el enlace aparezca en el pie de foto antes de enviar." : "Descargá y adjuntá la foto. Pegá el texto con el enlace en el pie de foto. Podés copiarlo desde Más opciones."}</p>
             <button className="action-button" disabled={ocupado || compartiendoFoto || !fotoEnvio} onClick={() => puedeCompartirFoto ? void compartirFoto(c) : descargarFotoYAbrir(c)}>
               {compartiendoFoto ? "Compartiendo..." : puedeCompartirFoto ? "Compartir foto y mensaje" : "Descargar foto y abrir chat"}
             </button>
-            <details><summary>Mas opciones</summary><div className="invitados-acciones">
+            <details><summary>Más opciones</summary><div className="invitados-acciones">
               {fotoEnvio && puedeCompartirFoto && <button className="secondary-button" onClick={() => descargarFotoYAbrir(c)}>Descargar foto y abrir chat</button>}
               {!fotoEnvio && <button className="secondary-button" disabled={ocupado} onClick={() => void ejecutar(() => descargarArchivo(base + "/portada.jpg", "invitacion.jpg"), "Foto descargada. Adjuntala en WhatsApp.")}>Descargar foto</button>}
               {c.url_canal && <a className="secondary-button" href={c.url_canal} target="_blank" rel="noopener noreferrer">Abrir chat (solo texto)</a>}
-              {c.mensaje && <button className="secondary-button" onClick={() => void ejecutar(() => navigator.clipboard.writeText(c.mensaje!), "Texto y enlace copiados.")}>Copiar texto y enlace</button>}
+              {(c.mensaje || c.enlace) && <button className="secondary-button" onClick={() => void ejecutar(() => navigator.clipboard.writeText(textoInvitacion(c)), "Texto y enlace copiados.")}>Copiar texto y enlace</button>}
             </div></details>
           </> : <>
             <p>{c.detalle || c.estado}</p>
@@ -426,8 +503,31 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
 
     </>}
     {informe && <section className="invitados-panel"><h2>Resultado de la importacion</h2><p>Importados: {informe.importados}. Actualizados: {informe.actualizados}. Omitidos: {informe.omitidos}. Rechazados: {informe.rechazados.length}.</p>{informe.rechazados.map(f => <p key={f.fila}>Fila {f.fila}: {f.error}</p>)}</section>}
+    {cuentaInvitado && <Ventana titulo="Cuenta autorizada del invitado" alCerrar={() => { if (!ocupado) setCuentaInvitado(null); }}>
+      <form className="invitados-form" onSubmit={async e => {
+        e.preventDefault();
+        if (cuentaInvitado.cuenta_email && cuentaInvitado.cuenta_email.toLowerCase() !== emailCuenta.trim().toLowerCase()
+          && !await confirmar("La cuenta anterior perdera acceso a esta invitacion y el QR anterior dejara de funcionar.", "Cambiar cuenta autorizada", "Cambiar cuenta")) return;
+        void ejecutar(async () => {
+          await api.put(`${base}/lista/${cuentaInvitado.id}/cuenta`, { email: emailCuenta.trim() });
+          setCuentaInvitado(null);
+        }, "Cuenta vinculada. El invitado debe ingresar con esa cuenta Google para ver su informacion.");
+      }}>
+        <p>Invitado: {cuentaInvitado.nombre} {cuentaInvitado.apellido}.</p>
+        <p>Autoriza la cuenta de Google de esta persona. Al volver a su enlace se recuperara su informacion; otras cuentas no podran ver el QR ni confirmar.</p>
+        <label>Cuenta Google autorizada<input type="email" required value={emailCuenta} disabled={ocupado} onChange={e => setEmailCuenta(e.target.value)} /></label>
+        <p>El invitado elige esa cuenta en Google; no necesita completar un correo en su invitacion. La vinculacion no envia mensajes.</p>
+        {avisoUI}
+        <div className="ventana-acciones"><button className="secondary-button" type="button" disabled={ocupado} onClick={() => setCuentaInvitado(null)}>Cancelar</button>
+          <button className="action-button" disabled={ocupado}>Vincular cuenta</button></div>
+      </form>
+    </Ventana>}
     {editor && <Ventana titulo={editor === "nuevo" ? "Agregar invitado o grupo" : "Editar invitado"} alCerrar={() => { if (!ocupado) setEditor(null); }}><form className="invitados-form" onSubmit={guardar}>
       <button type="button" className="secondary-button" disabled={ocupado} onClick={() => void elegirContacto()}>Elegir contacto del telefono</button>
+      {telefonosContacto.length > 1 && <label>Numero del contacto<select value={telefonosContacto.includes(form.telefono) ? form.telefono : ""} onChange={e => setForm(actual => ({ ...actual, telefono: e.target.value, whatsapp: e.target.value }))}>
+        {!telefonosContacto.includes(form.telefono) && <option value="">Selecciona un numero</option>}
+        {telefonosContacto.map(numero => <option key={numero} value={numero}>{numero}</option>)}
+      </select><small>Al elegir un numero se completa en Telefono y WhatsApp. Podes cambiar WhatsApp por separado si es distinto.</small></label>}
       {([['nombre', 'Nombre'], ['apellido', 'Apellido'], ['email', 'Email (opcional)'], ['telefono', 'Telefono (opcional)'], ['whatsapp', 'WhatsApp (numero con codigo de pais)'], ['instagram', 'Instagram (usuario o enlace)'], ['facebook', 'Facebook / Messenger (usuario o enlace)'], ['telegram', 'Telegram (usuario o telefono)'], ['otro_contacto', 'Otro contacto (opcional)'], ['grupo', 'Grupo familiar']] as const).map(([k, label]) => <label key={k}>{label}<input required={k === "nombre"} type={k === "email" ? "email" : "text"} value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></label>)}
       <p>Podes copiar el numero, usuario o enlace del contacto desde WhatsApp, Facebook, Instagram, Telegram u otra aplicacion. Los contactos son opcionales; no hace falta email para dar de alta un invitado.</p>
       <label>Cupo maximo, incluyendo titular<input type="number" min={1} max={1000} required value={form.cantidad_permitida} onChange={e => setForm({ ...form, cantidad_permitida: Number(e.target.value) })} /></label>
@@ -445,6 +545,10 @@ export function InvitadosPage({ integrado = false }: { integrado?: boolean } = {
       <button className="secondary-button" disabled={ocupado} onClick={() => void ejecutar(() => descargarArchivo(`${base}/lista/${aprobar.id}/qr.png`, "credencial.png"), "Credencial descargada.")}>Descargar QR aprobado</button>
     </div></Ventana>}
     {preview && <Ventana titulo="Vista previa de importacion" alCerrar={() => { if (!ocupado) setPreview(null); }}><p>Revisa los resultados antes de confirmar. No se eliminan confirmaciones.</p><div className="admin-table-wrap"><table className="invitados-tabla"><thead><tr><th>Fila</th><th>Invitado</th><th>Resultado previsto</th></tr></thead><tbody>{preview.filas.map(f => <tr key={f.fila}><td>{f.fila}</td><td>{f.datos?.nombre} {f.datos?.apellido}</td><td>{f.error || f.accion}</td></tr>)}</tbody></table></div>{avisoUI}<button className="action-button" disabled={ocupado} onClick={() => void ejecutar(async () => { const r = await api.post(`${base}/importar/${preview.token}`); setPreview(null); setInforme(r.data); })}>Confirmar importacion</button><button className="secondary-button" disabled={ocupado} onClick={() => setPreview(null)}>Cancelar</button></Ventana>}
+    {fotosInvitado && slug && <Ventana titulo={`Fotos de ${fotosInvitado.apellido} ${fotosInvitado.nombre}`} alCerrar={() => { if (!fotosOcupadas) setFotosInvitado(null); }}>
+      <FotosInvitado key={fotosInvitado.id} slug={slug} invitadoId={fotosInvitado.id} alOcupar={setFotosOcupadas} />
+      <button className="secondary-button" type="button" disabled={fotosOcupadas} onClick={() => setFotosInvitado(null)}>Cerrar fotos</button>
+    </Ventana>}
     {historial && <Ventana titulo="Historial de la invitacion" alCerrar={() => setHistorial(null)}><div className="invitados-historial"><h3>Movimientos</h3>{historial.auditoria.map((a, n) => <article key={n}><strong>{a.accion.replace(/_/g, " ")}</strong><p>{new Date(a.fecha).toLocaleString("es-AR")} · {a.actor || (a.actor_id ? "Usuario autorizado" : "Invitado")}</p>{Object.entries(a.datos).filter(([k]) => ["cantidad", "estado", "cupo", "motivo", "canal", "adultos", "menores"].includes(k)).map(([k, v]) => <span key={k}>{k}: {String(v)}. </span>)}</article>)}<h3>Distribucion</h3>{historial.distribuciones.map((d, n) => <p key={n}>{new Date(d.fecha).toLocaleString("es-AR")} · {d.canal} · {d.estado}. {d.detalle}</p>)}</div></Ventana>}
     {rolPorQuitar && <Ventana titulo={rolPorQuitar.rol === "AGASAJADO" ? "Quitar agasajado" : "Revocar rol"} alCerrar={() => { if (!ocupado) setRolPorQuitar(null); }}>
       <p>Queres quitar a <strong>{rolPorQuitar.email}</strong> como {rolPorQuitar.rol === "AGASAJADO" ? "agasajado" : "colaborador"} de este evento?</p>

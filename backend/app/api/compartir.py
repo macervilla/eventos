@@ -46,7 +46,7 @@ def compartir(slug: str, dev: bool = False, db=Depends(get_db)):
         else "Fecha a confirmar"
     )
     descripcion = fecha + ". " + (evento.descripcion or "Estas invitado a nuestro evento")[:250]
-    url = urljoin(base, "e/" + evento.slug)  # Nunca exponer token personal ni cupos en OG.
+    url = urljoin(base, evento.slug)  # Nunca exponer token personal ni cupos en OG.
     tags = {
         "og:title": titulo,
         "og:description": descripcion,

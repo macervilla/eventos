@@ -3,6 +3,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    video_enabled: bool = Field(default=False, alias="VIDEO_ENABLED")
+    video_bitrate: int = Field(default=1_200_000, ge=250_000, le=4_000_000, alias="VIDEO_BITRATE")
+    video_max_camaras_evento: int = Field(default=4, ge=1, le=16, alias="VIDEO_MAX_CAMARAS_EVENTO")
+    video_max_transmisiones: int = Field(default=4, ge=1, le=4, alias="VIDEO_MAX_TRANSMISIONES")
+    mediamtx_api_url: str = Field(default="http://mediamtx:9997", alias="MEDIAMTX_API_URL")
+    mediamtx_public_url: str = Field(default="/eventos/rtc", alias="MEDIAMTX_PUBLIC_URL")
+    mediamtx_auth_secret: SecretStr = Field(default=SecretStr(""), alias="MEDIAMTX_AUTH_SECRET")
     twilio_account_sid: str | None = Field(default=None, alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: SecretStr | None = Field(default=None, alias="TWILIO_AUTH_TOKEN")
     twilio_verify_service_sid: str | None = Field(default=None, alias="TWILIO_VERIFY_SERVICE_SID")

@@ -148,7 +148,7 @@ export function ProveedoresPage() {
               aria-label={`Ver pagina de ${proveedor.nombre_comercial}`}
               className="provider-card provider-card-link"
               key={proveedor.id}
-              to={`/p/${proveedor.slug}`}
+              to={`/${proveedor.slug}`}
             >
               <div>
                 <h2>{proveedor.nombre_comercial}</h2>

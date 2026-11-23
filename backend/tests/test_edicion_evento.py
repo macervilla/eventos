@@ -93,6 +93,25 @@ def test_datos_editables_e_identidad_inmutable(contexto):
     assert client.put(ruta, json=datos(modulos_habilitados=[]), headers=auth(propietario)).json()["modulos_habilitados"] == []
 
 
+def test_titulos_secciones_persisten_y_respetan_permisos(contexto):
+    client, db, _, propietario, _ = contexto
+    ruta = "/eventos/prueba"
+    assert client.get(ruta).json()["textos_secciones"]["detalles"] == "Detalles del evento"
+    titulos = {"detalles": "Sobre nuestra fiesta", "lugar": "Donde nos vemos", "galeria": "Recuerdos"}
+    respuesta = client.put(ruta, json=datos(textos_secciones=titulos), headers=auth(propietario))
+    assert respuesta.status_code == 200
+    assert respuesta.json()["textos_secciones"] == titulos
+    db.expire_all()
+    assert client.get(ruta).json()["textos_secciones"] == titulos
+    # Los clientes anteriores que no mandan titulos conservan los personalizados.
+    assert client.put(ruta, json=datos(), headers=auth(propietario)).json()["textos_secciones"] == titulos
+    visitante = User(email="sin-permisos@example.com")
+    db.add(visitante); db.commit()
+    assert client.put(ruta, json=datos(textos_secciones=titulos), headers=auth(visitante)).status_code == 403
+    for invalido in ({"detalles": ""}, {"detalles": "x" * 181}, {"otro": "No permitido"}):
+        assert client.put(ruta, json=datos(textos_secciones=invalido), headers=auth(propietario)).status_code == 422
+
+
 def test_identidad_google_persistente(contexto, google):
     client, db, _, propietario, _ = contexto
     r = client.post("/acceso/google", json={"credential": google(email=propietario.email, sub="google-estable")})
@@ -146,8 +165,8 @@ def test_enlace_email_conserva_destino(contexto, monkeypatch):
     client, _, _, propietario, _ = contexto
     enviados = []
     monkeypatch.setattr("app.services.acceso.send_access_link_email", lambda *args: enviados.append(args))
-    assert client.post("/acceso/solicitar-enlace", json={"email": propietario.email, "destino": "/e/prueba"}).status_code == 200
-    assert enviados[0][2] == "/e/prueba"
+    assert client.post("/acceso/solicitar-enlace", json={"email": propietario.email, "destino": "/prueba"}).status_code == 200
+    assert enviados[0][2] == "/prueba"
     for destino in ["https://otro.example", "//otro.example", "/\\otro.example"]:
         assert client.post("/acceso/solicitar-enlace", json={"email": propietario.email, "destino": destino}).status_code == 422
 

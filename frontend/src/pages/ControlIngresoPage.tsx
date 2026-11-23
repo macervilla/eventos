@@ -34,7 +34,7 @@ export function ControlIngresoPage() {
       if (!r.data.permisos.includes("control_ingreso") || !r.data.config.activo) { setError("No tenes acceso al control de ingreso o el modulo esta desactivado."); return; }
       setPermitido(true); setPuedeCorregir(r.data.permisos.includes("corregir_ingresos")); void actualizar();
     }).catch(err => {
-      if (axios.isAxiosError(err) && err.response?.status === 401) navigate(`/ingresar?destino=${encodeURIComponent(`/e/${slug}/control-ingreso`)}`, { replace: true });
+      if (axios.isAxiosError(err) && err.response?.status === 401) navigate(`/ingresar?destino=${encodeURIComponent(`/${slug}/control-ingreso`)}`, { replace: true });
       else setError(errorMensaje(err));
     });
     return () => { activo = false; parar(); };
@@ -78,7 +78,7 @@ export function ControlIngresoPage() {
     } finally { setOcupado(false); }
   }
   return <main className="invitados-page control-ingreso">
-    <header className="invitados-header"><div><Link to={`/e/${slug}`}>Volver al evento</Link><h1>Control de ingreso</h1><p>Escanea, consulta el cupo y confirma cuantas personas ingresan.</p></div></header>
+    <header className="invitados-header"><div><Link to={`/${slug}`}>Volver al evento</Link><h1>Control de ingreso</h1><p>Escanea, consulta el cupo y confirma cuantas personas ingresan.</p></div></header>
     {error && <p className="form-error" role="alert">{error}</p>}{aviso && <p className="success-inline" role="status">{aviso}</p>}
     {permitido && <>
       <section className="invitados-kpis">{["ingresados", "restantes", "parciales", "completos"].map(k => <article key={k}><span>{k}</span><strong>{kpis[k] || 0}</strong></article>)}</section>

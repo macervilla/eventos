@@ -12,7 +12,7 @@ type Permisos = { usuario: { id: number } | null; puede_editar: boolean; permiso
 export function AccesoEquipoPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const destino = `/e/${slug}`;
+  const destino = `/${slug}`;
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
   function herramientas(resultado: { rolEdicion: boolean; permisos: string[] }) {

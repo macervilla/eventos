@@ -61,6 +61,7 @@ export function GoogleSignIn({ onCredential }: { onCredential: (credential: stri
         if (cancelado || !contenedor.current) return;
         const identity = window.google?.accounts?.id;
         if (!identity) throw new Error("Google no esta disponible. Intenta recargar la pagina.");
+        identity.disableAutoSelect?.();
         identity.initialize({
           client_id: data.client_id, ux_mode: "popup", auto_select: false,
           callback: response => {

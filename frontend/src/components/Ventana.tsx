@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 
 type VentanaProps = {
   titulo: string;
@@ -8,9 +8,16 @@ type VentanaProps = {
 };
 
 export function Ventana({ titulo, alCerrar, children }: VentanaProps) {
+  const referencia = useRef<HTMLElement>(null);
   useEffect(() => {
     const cerrarConEscape = (evento: KeyboardEvent) => {
-      if (evento.key === "Escape") alCerrar();
+      if (evento.key !== "Escape" || evento.defaultPrevented) return;
+      const ventanas = document.querySelectorAll(".ventana[role='dialog']");
+      if (ventanas[ventanas.length - 1] !== referencia.current) return;
+      // Una vista previa o confirmacion anidada consume Escape sin cerrar su ventana de origen.
+      evento.preventDefault();
+      evento.stopImmediatePropagation();
+      alCerrar();
     };
     // addEventListener: escucha teclas en toda la pagina mientras la ventana esta abierta
     window.addEventListener("keydown", cerrarConEscape);
@@ -20,6 +27,7 @@ export function Ventana({ titulo, alCerrar, children }: VentanaProps) {
   return (
     <div className="ventana-fondo" onMouseDown={alCerrar}>
       <section
+        ref={referencia}
         aria-label={titulo}
         aria-modal="true"
         className="ventana"

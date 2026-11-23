@@ -49,6 +49,10 @@ class AsignacionRol(Datos):
     solo_responsable: bool = False
 
 
+class CuentaInvitado(Datos):
+    email: EmailStr
+
+
 class ContactoAgasajado(Datos):
     email: EmailStr
     canal: Literal["email", "whatsapp", "instagram", "messenger", "telegram"] = "email"
@@ -106,6 +110,29 @@ class PortalAcceso(Datos):
 
 class PortalRSVP(PortalAcceso):
     rsvp: RSVP
+
+
+class PersonaConfirmacion(Datos):
+    nombre: str = Field(min_length=1, max_length=160)
+    apellido: str = Field(min_length=1, max_length=160)
+    tipo: Literal["ADULTO", "MENOR"] = "ADULTO"
+
+    @model_validator(mode="after")
+    def validar_nombres(self):
+        self.nombre, self.apellido = self.nombre.strip(), self.apellido.strip()
+        if not self.nombre or not self.apellido:
+            raise ValueError("Completa apellido y nombre de cada persona")
+        return self
+
+
+class PortalConfirmacion(PortalAcceso):
+    personas: list[PersonaConfirmacion] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def validar_titular(self):
+        if self.personas[0].tipo != "ADULTO":
+            raise ValueError("La primera persona debe ser el titular adulto")
+        return self
 
 
 class EntregaPin(Datos):

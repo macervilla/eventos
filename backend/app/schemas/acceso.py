@@ -23,6 +23,7 @@ class EnlaceAccesoRequest(BaseModel):
 
 
 class AccessOption(BaseModel):
+    roles: list[str] = Field(default_factory=list)
     cuenta_id: int | None = None
     token: str | None = None
     tipo: str

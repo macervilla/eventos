@@ -14,6 +14,10 @@ verificacion de invitados esta documentada en [identidad y autorizacion](identid
    tecnica a agasajados o gestores.
 4. Cargar invitados o grupos familiares. Email y telefono son opcionales. El
    cupo incluye al titular. El responsable identifica de quien es la invitacion.
+   Al elegir un contacto de la agenda, su numero se carga en Telefono y tambien
+   en WhatsApp si no se habia indicado otro WhatsApp independiente. Si hay varios
+   numeros, se pueden seleccionar sin escribirlos. Si el navegador no comparte
+   telefono, la pantalla lo avisa y permite reintentar o completarlo manualmente.
 5. Para importar, descargar la plantilla, subir el `.xlsx`, revisar la vista
    previa y confirmar. Se admiten 1000 filas, hasta 5 MB comprimidos y 20 MB
    descomprimidos. Responsable se indica mediante su email de cuenta asignada
@@ -25,22 +29,26 @@ verificacion de invitados esta documentada en [identidad y autorizacion](identid
    enviar manualmente. No se registra entrega ni envio manual como verificados.
    Email registra aceptacion SMTP, que tampoco equivale a entrega. Un error se
    registra como fallido. Cada operacion tiene una clave de idempotencia.
-7. El enlace `/e/{slug}/i/{token}` abre la invitacion y el formulario sin Google.
-   En modo privado se acredita posesion del enlace, no identidad personal. En
-   modo email una sesion activa con el mismo correo del invitado permite confirmar
-   directamente, sin otro codigo. Sin sesion se valida con un codigo de un solo uso. Sin
-   email previo, se verifica el correo ingresado y se lo vincula. El telefono
-   requiere un proveedor oficial aun no integrado; no se simula ningun envio.
-8. El invitado indica adultos incluyendo titular y solo el nombre de cada menor.
-   Se guarda el total solicitado real, no el maximo. Puede corregir si las reglas
-   lo permiten. Aumentar una solicitud aprobada vuelve a requerir aprobacion en
-   modo manual y revoca el QR anterior. Una cancelacion invalida la credencial.
-9. Solo al aprobar se habilita un QR. Se muestra y descarga en el portal,
-   se envia automaticamente como adjunto al correo del invitado al aprobar (tambien
-   en aprobacion automatica) y puede revocarse o regenerarse. Un fallo SMTP no
-   deshace la confirmacion; guardar de nuevo permite reintentar, sin duplicar
-   correos ya aceptados por SMTP.
-10. El operador entra a `/e/{slug}/control-ingreso`, escanea con camara o ingresa
+7. El enlace `/{slug}/i/{token}` identifica la invitacion y muestra el correo enmascarado.
+   Tambien se recuperan las invitaciones registradas para el email realmente
+   verificado al entrar con Google a `/{slug}`. Confirmar y recuperar el QR exigen
+   Google con correo coincidente o codigo enviado a ese correo. WhatsApp, PIN,
+   telefono o poseer el enlace no acreditan el correo. No se acepta cambiar el
+   contacto desde el portal. Ver [confirmacion segura](confirmacion-segura-cuenta.md).
+8. **Confirmar** abre una ventana con apellido y nombre del titular editables y
+   campos separados de apellido y nombre por cada acompanante, adulto o menor.
+   Todos son obligatorios. La cantidad inicial ocupa el cupo asignado; puede
+   reducirse si asisten menos personas, sin bajar de los ingresos registrados.
+   El servidor valida esos datos y el cupo. No se modifican email, telefono ni
+   permisos del invitado desde esta ventana.
+9. La confirmacion nominal de un invitado registrado aprueba automaticamente
+   el cupo confirmado y emite el QR, incluso si el evento usa aprobacion manual
+   en sus otros flujos. No reactiva invitaciones revocadas por el organizador.
+   El QR se muestra y descarga en la pagina y se recupera al volver a ingresar,
+   sin repetir la confirmacion. Se conserva mientras este vigente y no sea
+   revocado. Si hay email, se intenta enviar tambien el adjunto; un fallo SMTP
+   no deshace la confirmacion. El reintento no duplica un correo ya aceptado.
+10. El operador entra a `/{slug}/control-ingreso`, escanea con camara o ingresa
     la credencial leida, consulta el grupo, indica cantidad y confirma. El mismo
     QR permite ingresos parciales hasta agotar el cupo. La busqueda de
     contingencia solo consulta; no permite ingresar sin una credencial valida.
@@ -48,9 +56,24 @@ verificacion de invitados esta documentada en [identidad y autorizacion](identid
 
 ## Arquitectura y permisos
 
+### Fotos enviadas por el invitado
+
+Cada invitacion admite hasta cuatro fotos privadas. Desde su invitacion o
+Modificar datos, el invitado puede revisarlas, quitarlas y subir reemplazos.
+En Gestion de invitados, **Fotos del invitado** permite al administrador
+descargarlas y **Confirmar fotos** para bloquear el conjunto. **Desbloquear
+fotos** vuelve a permitir los cambios. Esto no modifica asistencia ni QR y no
+publica imagenes automaticamente. Ver [fotos de invitados](fotos-invitados.md).
+Aplicar la migracion `0019_fotos_invitados` antes de iniciar el backend actualizado.
+
+### Modelo y roles
+
 Se extienden `Invitacion`, `Participante`, `EventoUsuario` y `EventoModulo`.
 No se reemplazan las tablas existentes. Las migraciones `0010_invitados` y
 `0011_invitados_integridad` agregan los datos, indices y restricciones.
+La migracion `0018_nombres_acompanantes` agrega `participantes.apellido` con
+valor inicial vacio, conservando los datos anteriores. Aplicar antes de iniciar
+el backend actualizado: `alembic upgrade head`.
 Se conservan el nombre y el slug inmutables y el flujo Google existente.
 
 `ADMIN_EVENTO` admite configuracion y asignacion de roles. `AGASAJADO` y
@@ -102,7 +125,7 @@ local. Se genera una portada optimizada de 1200 x 630 en JPG; tambien puede
 descargarse sin datos de invitados. La portada predeterminada es un archivo
 local, sin alojamiento de imagenes externo.
 
-Vite intercepta el HTML inicial de `/e/{slug}` y `/e/{slug}/i/{token}` y obtiene
+Vite intercepta el HTML inicial de `/{slug}` y `/{slug}/i/{token}` y obtiene
 los metadatos del backend `/compartir/{slug}`. Incluye Open Graph y Twitter Card
 antes de ejecutar React. La URL canonica es la pagina generica del evento; no
 incluye tokens, datos personales ni cupos. El enlace personal escrito en el
@@ -172,13 +195,10 @@ adjuntar automaticamente una imagen. Instagram y Messenger tambien requieren
 completar el envio privado en sus aplicaciones. Ninguna de estas acciones se
 registra como entrega comprobada.
 
-El acceso del receptor requiere una sesion verificada por defecto
-(`requiere_login=true`). Si un evento anterior usaba solo un enlace sin PIN,
-el portal exige ahora el codigo de email antes de mostrar datos personales y
-aceptar el RSVP. No requiere registrar una cuenta de Google. Los eventos que
-configuren un PIN exigen ese codigo privado. `requiere_login=false` se conserva
-solo como compatibilidad explicita para el modo de posesion de enlace anterior;
-no es el valor predeterminado ni se ofrece como acceso rapido en la pantalla.
+Confirmar y recuperar QR siempre exigen verificar el correo registrado mediante
+Google o un codigo de email, incluso cuando una configuracion anterior permitia
+usar solo el enlace. Un PIN o telefono no reemplazan esa verificacion. Los
+controles existentes de multimedia conservan su implementacion.
 
 La portada compartida y descargada es vertical e incluye fecha, titulo y lugar
 sobre la foto, con el encuadre y la tipografia de la invitacion movil.

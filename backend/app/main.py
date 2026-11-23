@@ -6,11 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import OperationalError, IntegrityError
 
+from app.api.publico import router as publico_router
+from app.api.solicitudes_invitacion import router as solicitudes_invitacion_router
 from app.api.acceso import router as acceso_router
 from app.api.geografia import router as geografia_router
 from app.api.administracion import router as administracion_router
 from app.api.eventos import router as eventos_router
 from app.api.invitados import router as invitados_router
+from app.api.fotos_invitados import router as fotos_invitados_router
+from app.api.video import router as video_router
+from app.services.video_worker import ciclo_video
 from app.api.compartir import router as compartir_router
 from app.services.media_storage import media_storage
 from app.api.media import router as media_router
@@ -19,7 +24,7 @@ from app.api.ubicacion import router as ubicacion_router
 from app.core.config import settings
 from app.core.log_privacidad import proteger_logs
 
-app = FastAPI(title="Eventos API", version="0.1.0")
+app = FastAPI(title="Eventos API", version="0.1.0", lifespan=ciclo_video)
 proteger_logs()
 
 app.add_middleware(
@@ -30,6 +35,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(publico_router)
+app.include_router(solicitudes_invitacion_router)
 app.include_router(proveedores_router)
 app.include_router(ubicacion_router)
 app.include_router(acceso_router)
@@ -37,6 +44,8 @@ app.include_router(geografia_router)
 app.include_router(administracion_router)
 app.include_router(eventos_router)
 app.include_router(invitados_router)
+app.include_router(fotos_invitados_router)
+app.include_router(video_router)
 app.include_router(compartir_router)
 app.include_router(media_router)
 Path(settings.media_root).mkdir(parents=True, exist_ok=True)

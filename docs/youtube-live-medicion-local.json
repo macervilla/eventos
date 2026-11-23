@@ -1,0 +1,24 @@
+{
+  "fecha": "2026-11-17",
+  "entorno": "Docker Desktop local; no es el VPS",
+  "imagen": "eventos-youtube-evaluacion:local",
+  "limites": {"cpus": 0.6, "memoria_mib": 384, "swap": false, "red": "none", "filesystem": "read-only", "pids": 64},
+  "duracion_por_escenario_s": 20,
+  "multimedia_en_disco": false,
+  "resultados": [
+    {"escenario": "negro_silencio_540p20", "codigo": 0, "duracion_s": 19.78, "video_s": 20.0, "velocidad": 1.011, "cpu_un_nucleo_pct": 6.5, "memoria_contenedor_mib": 48.2, "frames": 400},
+    {"escenario": "vp8_opus_a_540p20", "codigo": 0, "duracion_s": 19.67, "video_s": 20.0, "velocidad": 1.017, "cpu_un_nucleo_pct": 15.1, "memoria_contenedor_mib": 54.1, "frames": 400},
+    {"escenario": "vp8_opus_a_720p20", "codigo": 0, "duracion_s": 19.67, "video_s": 20.0, "velocidad": 1.017, "cpu_un_nucleo_pct": 14.0, "memoria_contenedor_mib": 58.7, "frames": 400}
+  ],
+  "limitaciones": [
+    "Patron sintetico, no escenas reales de celulares",
+    "No mide conmutacion, worker completo, RTMPS, OAuth ni disponibilidad del archivo en YouTube",
+    "No certifica rendimiento ni consumo en el VPS",
+    "CPU es porcentaje de un nucleo local; RAM incluye el contenedor y la fixture comprimida en memoria",
+    "Sin datos de transferencia reales; estimacion de salida propuesta 1,5 Mbps con audio y margen"
+  ],
+  "reproducir": [
+    "docker build -t eventos-youtube-evaluacion:local infra/youtube-evaluacion",
+    "docker run --rm --network none --cpus 0.6 --memory 384m --memory-swap 384m --pids-limit 64 --read-only --cap-drop ALL --security-opt no-new-privileges eventos-youtube-evaluacion:local"
+  ]
+}

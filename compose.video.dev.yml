@@ -1,0 +1,67 @@
+# Entorno local independiente. No utiliza la API, BD ni media del VPS.
+# docker compose --env-file .env.video.dev -p eventos-video-dev -f compose.video.dev.yml up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: eventos_video_dev
+      POSTGRES_USER: eventos
+      POSTGRES_PASSWORD: ${VIDEO_DEV_DB_PASSWORD:?Configurar VIDEO_DEV_DB_PASSWORD}
+    volumes:
+      - video_dev_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U eventos -d eventos_video_dev"]
+      interval: 3s
+      retries: 20
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://eventos:${VIDEO_DEV_DB_PASSWORD}@db:5432/eventos_video_dev
+      SECRET_KEY: ${VIDEO_DEV_SECRET_KEY:?Configurar VIDEO_DEV_SECRET_KEY}
+      VIDEO_ENABLED: 'true'
+      VIDEO_BITRATE: ${VIDEO_BITRATE:-1200000}
+      VIDEO_MAX_CAMARAS_EVENTO: ${VIDEO_MAX_CAMARAS_EVENTO:-4}
+      VIDEO_MAX_TRANSMISIONES: ${VIDEO_MAX_TRANSMISIONES:-4}
+      MEDIAMTX_AUTH_SECRET: ${MEDIAMTX_AUTH_SECRET:?Configurar MEDIAMTX_AUTH_SECRET}
+      MEDIAMTX_API_URL: http://mediamtx:9997
+      MEDIAMTX_PUBLIC_URL: /rtc
+      FRONTEND_PUBLIC_URL: http://localhost:5189
+      BACKEND_CORS_ORIGINS: http://localhost:5189,http://127.0.0.1:5189
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    ports:
+      - "127.0.0.1:18090:8000"
+    volumes:
+      - video_dev_media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+  frontend:
+    build: ./frontend
+    command: npm run dev -- --host 0.0.0.0 --port 5189
+    volumes:
+      - ./frontend:/app
+      - video_dev_node_modules:/app/node_modules
+    environment:
+      VPS_API_TARGET: http://backend:8000
+      MEDIA_PROXY_TARGET: http://backend:8000
+      VITE_API_URL: /api-vps
+      MEDIAMTX_WEBRTC_TARGET: http://mediamtx:8889
+    ports:
+      - "127.0.0.1:5189:5189"
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.3
+    volumes:
+      - ./infra/mediamtx.yml:/mediamtx.yml:ro
+    environment:
+      MTX_AUTHHTTPADDRESS: http://mediamtx:${MEDIAMTX_AUTH_SECRET}@backend:8000/interno/mediamtx/auth
+      MTX_WEBRTCADDITIONALHOSTS: 127.0.0.1
+      MTX_WEBRTCLOCALUDPADDRESS: :18189
+      MTX_WEBRTCLOCALTCPADDRESS: :18189
+    ports:
+      - "127.0.0.1:18889:8889"
+      - "18189:18189/udp"
+      - "18189:18189/tcp"
+volumes:
+  video_dev_postgres:
+  video_dev_media:
+  video_dev_node_modules:

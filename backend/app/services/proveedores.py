@@ -5,7 +5,6 @@ from sqlalchemy import Select, and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import Plan
-from app.models.eventos import Evento
 from app.models.proveedores import CategoriaProveedor, Proveedor, ProveedorCategoriaLink
 from app.models.usuarios import User
 from app.models.geografia import GeoPais
@@ -45,19 +44,13 @@ def ensure_default_categories(db: Session) -> None:
     db.flush()
 
 
-def validate_requested_slug(db: Session, value: str, exclude_id: int | None = None) -> str:
+def validate_requested_slug(db: Session, value: str) -> str:
+    from app.models.slugs import RESERVED_SLUGS, SlugPublico
+
     candidate = slugify(value)
-    provider_query = select(Proveedor.id).where(Proveedor.slug == candidate)
-    if exclude_id is not None:
-        provider_query = provider_query.where(Proveedor.id != exclude_id)
-    if db.scalar(provider_query):
-        raise HTTPException(status_code=409, detail="El slug ya esta en uso")
-
-    if db.scalar(select(Evento.id).where(Evento.slug == candidate)):
-        raise HTTPException(status_code=409, detail="El slug ya esta en uso")
-
-    event_names = db.scalars(select(Evento.nombre)).all()
-    if any(slugify(event_name) == candidate for event_name in event_names):
+    if candidate in RESERVED_SLUGS:
+        raise HTTPException(status_code=422, detail="El slug es una ruta reservada")
+    if db.get(SlugPublico, candidate) is not None:
         raise HTTPException(status_code=409, detail="El slug ya esta en uso")
     return candidate
 
@@ -183,12 +176,12 @@ def update_proveedor(db: Session, slug: str, data: ProveedorCreate) -> Proveedor
             values.pop(campo, None)
     values = resolver_geografia(db, values, proveedor)
     requested_slug = values.pop("slug", None)
+    if requested_slug != proveedor.slug:
+        raise HTTPException(status_code=422, detail="El slug es inmutable")
     url_anterior = proveedor.google_maps_url
     for key, value in values.items():
         setattr(proveedor, key, value)
     _actualizar_coordenadas(proveedor, url_anterior)
-    if requested_slug and requested_slug != proveedor.slug:
-        proveedor.slug = validate_requested_slug(db, requested_slug, exclude_id=proveedor.id)
     _sync_categories(db, proveedor, data.categorias)
     db.commit()
     db.refresh(proveedor)

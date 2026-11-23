@@ -1,0 +1,29 @@
+# MediaMTX v1.21.3. Las credenciales y hosts se inyectan por Compose.
+logLevel: warn
+authMethod: http
+authHTTPExclude:
+  - action: api
+api: true
+apiAddress: :9997
+metrics: false
+pprof: false
+playback: false
+rtsp: false
+rtmp: false
+hls: false
+srt: false
+moq: false
+webrtc: true
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcIPsFromInterfaces: false
+webrtcAdditionalHosts: [127.0.0.1]
+webrtcAllowOrigins: ['https://acersistemas.site', 'http://localhost:5179', 'http://127.0.0.1:5179', 'http://127.0.0.1:5180', 'http://localhost:5180', 'http://127.0.0.1:5189', 'http://localhost:5189']
+webrtcICEServers2: []
+pathDefaults:
+  source: publisher
+  overridePublisher: false
+  record: false
+paths:
+  '~^evt-[0-9]+-[a-f0-9]{32}$':

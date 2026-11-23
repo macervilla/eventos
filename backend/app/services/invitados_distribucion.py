@@ -95,12 +95,14 @@ def distribuir(db, ctx, data):
                 continue
             token = cifrador().decrypt(actual.token_cifrado.encode()).decode()
         else:
-            token = emitir(db, inv, "enlace")
+            # Cada envio nuevo reinicia el acceso por enlace sin alterar RSVP, cupo ni QR.
+            # Los reintentos con la misma idempotencia se resuelven antes de este punto.
+            token = emitir(db, inv, "enlace", renovar=True)
         # El enlace es privado; los metadatos apuntan a la pagina generica del evento.
         enlace = (
-            f"{settings.frontend_public_url.rstrip('/')}/e/{ctx.evento.slug}/i/{token}"
+            f"{settings.frontend_public_url.rstrip('/')}/{ctx.evento.slug}/i/{token}"
             if data.tipo == "invitacion"
-            else f"{settings.frontend_public_url.rstrip('/')}/e/{ctx.evento.slug}/i/{emitir(db, inv, 'enlace')}"
+            else f"{settings.frontend_public_url.rstrip('/')}/{ctx.evento.slug}/i/{emitir(db, inv, 'enlace')}"
         )
         enlace += "#mi-confirmacion"
         titulo = ctx.evento.titulo_visual or ctx.evento.nombre
@@ -123,7 +125,7 @@ def distribuir(db, ctx, data):
                     raise HTTPException(422, "El invitado no tiene email")
                 destino = escape(enlace, quote=True)
                 imagen = f'<a href="{destino}"><img alt="Portada del evento" width="600" style="max-width:100%;height:auto" src="{escape(portada_publica, quote=True)}"></a>'
-                html = f'{imagen}<h1>{escape(titulo)}</h1><p>{escape((ctx.evento.descripcion or "")[:300])}</p><p>Presiona <a href="{destino}">aquí</a> para confirmar.</p>'
+                html = f'{imagen}<h1>{escape(titulo)}</h1><p>{escape((ctx.evento.descripcion or "")[:300])}</p><p><a href="{destino}">Confirmar asistencia</a></p>'
                 _send_email(
                     inv.email,
                     titulo,

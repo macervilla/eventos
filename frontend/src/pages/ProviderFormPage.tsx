@@ -270,11 +270,11 @@ export function ProviderFormPage() {
     request
       .then((response) => {
         if (slug) {
-          navigate(`/p/${response.data.slug}`);
+          navigate(`/${response.data.slug}`);
           return;
         }
         const creada = response.data as Proveedor & { bienvenida_enviada?: boolean; email_validado?: boolean; error_correo?: string | null };
-        if (creada.email_validado && obtenerTokenSesion()) { navigate(`/p/${creada.slug}`); return; }
+        if (creada.email_validado && obtenerTokenSesion()) { navigate(`/${creada.slug}`); return; }
         setBienvenidaEnviada(Boolean(creada.bienvenida_enviada));
         setErrorCorreo(creada.error_correo ?? null);
         setSavedProviderSlug(response.data.slug);
@@ -317,7 +317,7 @@ export function ProviderFormPage() {
           </p>
           <div className="confirmation-actions">
             {errorCorreo && <p className="form-error" role="alert">Tu proveedor se guardo, pero no pudimos enviar la bienvenida: {errorCorreo}</p>}
-            <button className="action-button" type="button" onClick={() => navigate(`/ingresar?destino=${encodeURIComponent(`/p/${savedProviderSlug}`)}`)}>Ingresar con Google</button>
+            <button className="action-button" type="button" onClick={() => navigate(`/ingresar?destino=${encodeURIComponent(`/${savedProviderSlug}`)}`)}>Ingresar con Google</button>
             <button className="secondary-button" type="button" onClick={() => navigate("/")}>
               <ArrowLeft size={18} aria-hidden="true" />
               Volver al inicio
@@ -325,7 +325,7 @@ export function ProviderFormPage() {
             <button
               className="action-button"
               type="button"
-              onClick={() => navigate(`/p/${savedProviderSlug}`)}
+              onClick={() => navigate(`/${savedProviderSlug}`)}
             >
               Ver pagina publica
             </button>
@@ -361,6 +361,7 @@ export function ProviderFormPage() {
             aria-invalid={Boolean(errors.slug)}
             className={inputClass("slug")}
             value={form.slug}
+            readOnly={Boolean(slug)}
             onChange={(event) => update("slug", event.target.value)}
             placeholder="salon-del-lago"
           />
@@ -491,11 +492,13 @@ export function ProviderFormPage() {
           {errors.categorias && <span className="field-error">{errors.categorias}</span>}
         </section>
 
-        <LocalidadAutocomplete preservarPin valor={form} alCambiar={geo => {
+        <LocalidadAutocomplete preservarPin valor={form} errores={errors} alCambiar={geo => {
           setForm(actual => ({ ...actual, localidad: geo.localidad, provincia: geo.provincia, pais: geo.pais,
             geoname_id: geo.geoname_id ?? null, codigo_pais: geo.codigo_pais ?? null,
             latitud: geo.latitud ?? null, longitud: geo.longitud ?? null }));
-          clearError("localidad"); clearError("provincia");
+          if (geo.localidad.trim()) clearError("localidad");
+          if (geo.provincia.trim() || geo.geoname_id) clearError("provincia");
+          if (geo.pais.trim()) clearError("pais");
         }} />
         <label className="wide">
           Direccion
@@ -580,7 +583,7 @@ export function ProviderFormPage() {
           <button
             className="secondary-button"
             type="button"
-            onClick={() => navigate(`/p/${slug ?? form.slug}`)}
+            onClick={() => navigate(`/${slug ?? form.slug}`)}
             disabled={!(slug ?? form.slug)}
           >
             <ExternalLink size={18} aria-hidden="true" />

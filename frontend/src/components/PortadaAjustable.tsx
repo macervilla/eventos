@@ -1,5 +1,6 @@
 import { Check, Crosshair, Maximize, Minimize, X } from "lucide-react";
 import { PointerEvent, useEffect, useRef, useState } from "react";
+import { mensajeGuardado, useGuardadoAutomatico } from "./useGuardadoAutomatico";
 
 export type EncuadrePortada = {
   x: number;
@@ -66,10 +67,11 @@ type EditorEncuadreProps = {
   alCambiar: (encuadre: EncuadrePortada) => void;
   alGuardar: () => void;
   alCancelar: () => void;
+  estado?: Parameters<typeof mensajeGuardado>[0];
 };
 
 /** Capa sobre la portada: se arrastra la imagen para elegir que parte se ve. */
-export function EditorEncuadre({ encuadre, guardando, alCambiar, alGuardar, alCancelar }: EditorEncuadreProps) {
+export function EditorEncuadre({ encuadre, guardando, alCambiar, alGuardar, alCancelar, estado }: EditorEncuadreProps) {
   const inicio = useRef<{ px: number; py: number; encuadre: EncuadrePortada } | null>(null);
 
   const empezar = (e: PointerEvent<HTMLDivElement>) => {
@@ -106,6 +108,7 @@ export function EditorEncuadre({ encuadre, guardando, alCambiar, alGuardar, alCa
       />
       <div className="portada-editor-barra" role="toolbar" aria-label="Encuadre de la portada">
         <span>Arrastra la imagen para elegir que se ve</span>
+        {estado && <span role={estado === "error" ? "alert" : "status"}>{mensajeGuardado(estado)}</span>}
         <div className="portada-editor-modos">
           <button
             className={encuadre.modo === "cubrir" ? "activo" : undefined}
@@ -132,7 +135,7 @@ export function EditorEncuadre({ encuadre, guardando, alCambiar, alGuardar, alCa
         >
           <Crosshair size={18} aria-hidden="true" />
         </button>
-        <button className="icono-boton" title="Cancelar" type="button" onClick={alCancelar}>
+        <button className="icono-boton" title="Cerrar ajuste" type="button" onClick={alCancelar}>
           <X size={18} aria-hidden="true" />
         </button>
         <button className="action-button" disabled={guardando} type="button" onClick={alGuardar}>
@@ -152,7 +155,7 @@ export function useAjusteEncuadre(
   alError: (mensaje: string) => void
 ) {
   const [borrador, setBorrador] = useState<EncuadrePortada | null>(null);
-  const [guardando, setGuardando] = useState(false);
+  const automatico = useGuardadoAutomatico(guardar);
   const efectivo = useEncuadreAutomatico(imagen, guardado);
 
   return {
@@ -162,15 +165,14 @@ export function useAjusteEncuadre(
     editor: borrador && (
       <EditorEncuadre
         encuadre={borrador}
-        guardando={guardando}
-        alCambiar={setBorrador}
-        alCancelar={() => setBorrador(null)}
-        alGuardar={() => {
-          setGuardando(true);
-          guardar(borrador)
-            .then(() => setBorrador(null))
-            .catch(() => alError("No se pudo guardar el encuadre."))
-            .finally(() => setGuardando(false));
+        guardando={automatico.estado === "guardando"}
+        estado={automatico.estado}
+        alCambiar={valor => { setBorrador(valor); automatico.programar(valor); }}
+        alCancelar={async () => { if (await automatico.guardarAhora()) setBorrador(null); }}
+        alGuardar={async () => {
+          automatico.programar(borrador);
+          if (await automatico.guardarAhora()) setBorrador(null);
+          else alError("No se pudo guardar el encuadre.");
         }}
       />
     )

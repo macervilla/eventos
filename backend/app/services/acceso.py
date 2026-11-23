@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from google.auth.exceptions import GoogleAuthError, TransportError
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2 import id_token
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -15,7 +15,9 @@ from app.core.seguridad import (
     crear_token_sesion,
     leer_datos_enlace,
 )
-from app.models.eventos import Evento, EventoUsuario
+from app.models.eventos import Evento, EventoModulo, EventoUsuario
+from app.models.enums import EventoEstado
+from app.models.invitaciones import Invitacion
 from app.models.proveedores import Proveedor
 from app.models.usuarios import User
 from app.schemas.acceso import AccessOption, AccessResponse
@@ -104,14 +106,20 @@ def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool
             func.lower(User.email) == user.email.lower(), User.activo.is_(True)).order_by(User.id)).all()
         if len(cuentas) > 1:
             opciones = []
-            vistos = set()
+            vistos = {}
             for cuenta in cuentas:
                 for opcion in get_access_options_by_user(db, cuenta, metodo=metodo, email_google=email_google).opciones:
                     clave = (opcion.tipo, opcion.id)
                     if clave not in vistos:
                         opcion.token = crear_token_sesion(cuenta, metodo=metodo, email_google=email_google)
                         opciones.append(opcion)
-                        vistos.add(clave)
+                        vistos[clave] = opcion
+                    elif vistos[clave].roles == ["Invitado"] and opcion.roles != ["Invitado"]:
+                        # Una cuenta vinculada con rol de gestion tiene prioridad sobre el acceso de invitado.
+                        anterior = vistos[clave]
+                        opcion.token = crear_token_sesion(cuenta, metodo=metodo, email_google=email_google)
+                        opciones[opciones.index(anterior)] = opcion
+                        vistos[clave] = opcion
             return AccessResponse(email=user.email, usuario_id=user.id, opciones=opciones, email_validado=bool(user.email_validado_en), google_vinculado=True)
 
     proveedores = db.scalars(
@@ -122,11 +130,22 @@ def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool
     ).all()
 
     # Usar los mismos permisos efectivos que las operaciones, sin comparar JSON como texto.
+    asignaciones = [a for a in db.scalars(select(EventoUsuario).where(EventoUsuario.usuario_id == user.id))
+                    if asignacion_con_acceso(a)]
     eventos_como_miembro = {
         asignacion.evento_id
-        for asignacion in db.scalars(select(EventoUsuario).where(EventoUsuario.usuario_id == user.id))
-        if asignacion_con_acceso(asignacion)
+        for asignacion in asignaciones
     }
+    eventos_como_invitado = set()
+    if metodo == "google" and email_google:
+        eventos_como_invitado = set(db.scalars(select(Invitacion.evento_id).join(
+            EventoModulo, and_(EventoModulo.evento_id == Invitacion.evento_id,
+                              EventoModulo.modulo == "invitados", EventoModulo.activo.is_(True))).where(
+            Invitacion.activo.is_(True),
+            or_(Invitacion.usuario_id == user.id, and_(Invitacion.usuario_id.is_(None),
+                func.lower(func.trim(Invitacion.email)) == email_google.strip().lower())),
+            Invitacion.aprobacion.notin_(["REVOCADO", "RECHAZADO"]),
+            Invitacion.rsvp.notin_(["RECHAZADO", "CANCELADO"]))))
     eventos = db.scalars(
         select(Evento)
         .where(
@@ -134,6 +153,7 @@ def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool
             or_(
                 Evento.propietario_id == user.id,
                 Evento.id.in_(eventos_como_miembro),
+                and_(Evento.id.in_(eventos_como_invitado), Evento.estado != EventoEstado.BORRADOR),
             ),
         )
         .order_by(Evento.fecha_inicio.desc().nulls_last())
@@ -141,28 +161,40 @@ def get_access_options_by_user(db: Session, user: User, incluir_vinculadas: bool
 
     opciones = [
         AccessOption(
-            tipo="proveedor",
+            tipo="proveedor", roles=["Administrador"],
             id=proveedor.id,
             nombre=proveedor.nombre_comercial,
             slug=proveedor.slug,
-            path=f"/p/{proveedor.slug}",
+            path=f"/{proveedor.slug}",
         )
         for proveedor in proveedores
     ]
+    etiquetas_roles = {"PROPIETARIO": "Administrador", "ADMIN_EVENTO": "Administrador",
+        "AGASAJADO": "Agasajado", "GESTOR_INVITADOS": "Gestor de invitados",
+        "CONTROL_INGRESO": "Control de ingreso", "ENCARGADO": "Encargado"}
+    def roles_evento(evento):
+        roles = (["Superadministrador"] if user.es_superadministrador else [])
+        if evento.propietario_id == user.id:
+            roles.append("Administrador")
+        roles.extend(etiquetas_roles.get(a.rol.value, a.rol.value.replace("_", " ").capitalize())
+                     for a in asignaciones if a.evento_id == evento.id)
+        if evento.id in eventos_como_invitado and evento.estado != EventoEstado.BORRADOR:
+            roles.append("Invitado")
+        return list(dict.fromkeys(roles))
     opciones.extend(
         AccessOption(
-            tipo="evento",
+            tipo="evento", roles=roles_evento(evento),
             id=evento.id,
             nombre=evento.nombre,
             slug=evento.slug,
-            path=f"/e/{evento.slug}",
+            path=f"/{evento.slug}",
         )
         for evento in eventos
     )
 
     if user.es_superadministrador:
         opciones.insert(0, AccessOption(
-            tipo="administracion", id=user.id, nombre="Administracion del proyecto",
+            tipo="administracion", roles=["Superadministrador"], id=user.id, nombre="Administracion del proyecto",
             slug="administracion", path="/administracion",
         ))
 
@@ -184,36 +216,27 @@ def _respuesta_con_sesion(db: Session, usuario: User, *, metodo: str = "email", 
 def get_access_options_by_google_token(db: Session, credential: str, actual: User | None = None) -> AccessResponse:
     profile = get_verified_google_profile(credential)
     vinculadas = db.scalars(select(User).where(User.google_subject == profile["sub"]).order_by(User.id)).all()
-    autoridad = profile["email"].endswith("@gmail.com") or bool(profile.get("hd"))
     candidatas = db.scalars(select(User).where(func.lower(User.email) == profile["email"]).order_by(User.id)).all()
+    if not vinculadas and any(c.google_subject and c.google_subject != profile["sub"] for c in candidatas):
+        raise HTTPException(403, "Ese correo ya esta vinculado a otra identidad Google")
     elegibles = []
     for cuenta in candidatas:
         if cuenta.google_subject not in (None, profile["sub"]) or not cuenta.activo:
             continue
-        if cuenta.google_subject is None and not autoridad:
-            # Google no acredita la propiedad actual de un correo externo como Hotmail.
-            # La vinculacion inicial requiere la sesion obtenida al validar ese email.
-            if actual is None or actual.email.lower() != profile["email"] or not actual.email_validado_en:
-                continue
-        vinculada = cuenta.google_subject == profile["sub"]
         cuenta.google_subject = profile["sub"]
-        if (autoridad or vinculada) and cuenta.email_validado_en is None:
+        if cuenta.email_validado_en is None:
             cuenta.email_validado_en = datetime.now(UTC)
-        elif not autoridad and actual is not None and cuenta.email_validado_en is None:
-            cuenta.email_validado_en = actual.email_validado_en
         elegibles.append(cuenta)
     if not candidatas and not vinculadas:
-        if not autoridad:
-            raise HTTPException(403, "Para usar este correo con Google, registra tu sitio y valida el email una sola vez")
         usuario = User(email=profile["email"], nombre=profile.get("name"), google_subject=profile["sub"],
-                       email_validado_en=datetime.now(UTC) if autoridad else None)
+                       email_validado_en=datetime.now(UTC))
         db.add(usuario)
         elegibles.append(usuario)
     disponibles = [u for u in vinculadas if u.activo] or elegibles
     if not disponibles:
         if candidatas and not any(u.activo for u in candidatas):
             return AccessResponse(email=profile["email"], opciones=[])
-        raise HTTPException(403, "Para vincular este correo con Google por primera vez, valida tu email e ingresa desde la sesion inicial")
+        raise HTTPException(403, "La cuenta elegida no coincide con la identidad Google vinculada")
     usuario = disponibles[0]
     db.commit()
     return _respuesta_con_sesion(db, usuario, metodo="google", email_google=profile["email"])

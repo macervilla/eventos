@@ -11,7 +11,7 @@ def test_aviso_agasajado_indica_google_email_y_acceso_de_equipo(contexto):
     aviso = r.json()["avisos"][0]
     assert aviso["rol"] == "Agasajado"
     assert "Google" in aviso["mensaje"] and "agasajado@example.com" in aviso["mensaje"]
-    assert "/e/prueba/acceso-equipo" in aviso["mensaje"]
+    assert "/prueba/acceso-equipo" in aviso["mensaje"]
     assert "/i/" not in aviso["mensaje"] and "confirmar asistencia" not in aviso["mensaje"]
 
 

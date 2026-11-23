@@ -90,7 +90,7 @@ sin correo configurado el backend devuelve 503 en esos flujos.
 
 La configuracion sirve la SPA en las paginas de eventos. Las vistas previas
 sociales personalizadas del endpoint /compartir requieren una integracion
-adicional; no redirigir todas las rutas /e/ a ese endpoint porque rechaza
+adicional; no redirigir todas las rutas / a ese endpoint porque rechaza
 borradores y bloquearia sus enlaces de confirmacion.
 
 ## Diagnostico

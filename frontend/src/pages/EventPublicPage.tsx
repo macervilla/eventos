@@ -6,10 +6,11 @@ import { GaleriaEvento } from "../components/GaleriaEvento";
 import { useMenuSesion } from "../components/MenuSesionContext";
 import { TextosPortadaEvento } from "../components/TextosPortada";
 import { IngresoEvento } from "../components/IngresoEvento";
+import { ConfirmacionInvitado } from "../components/ConfirmacionInvitado";
 import { Ventana } from "../components/Ventana";
 import { api } from "../api/client";
 import { cerrarSesion, guardarValidacionEmail, obtenerTokenSesion } from "../api/sesion";
-import { Evento, VentanaDatosEvento, VentanaSalonEvento, VentanaGaleriaEvento } from "../components/EdicionEvento";
+import { Evento, TEXTOS_SECCIONES_INICIALES, VentanaDatosEvento, VentanaSalonEvento, VentanaGaleriaEvento } from "../components/EdicionEvento";
 import { mensajeDeError, urlMapaEmbebido } from "../components/EdicionProveedor";
 import { CapasPortada, EncuadrePortada, useAjusteEncuadre } from "../components/PortadaAjustable";
 import { leerImagenDelPortapapeles, prepararImagen, usePegarImagen } from "../components/pegarImagen";
@@ -40,7 +41,7 @@ function formatearFecha(iso: string) {
 }
 
 export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => void } = {}) {
-  const { slug } = useParams();
+  const { slug, token } = useParams();
   const { actualizarAccionesEvento, actualizarAlCerrarSesion } = useMenuSesion();
   const [searchParams, setSearchParams] = useSearchParams();
   const confirmacionProcesada = useRef(false);
@@ -49,6 +50,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
   const [evento, setEvento] = useState<Evento | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [esAdministrador, setEsAdministrador] = useState(false);
+  const [permisosCargados, setPermisosCargados] = useState(false);
   const [usuario, setUsuario] = useState<PermisosEvento['usuario']>(null);
   const [rol, setRol] = useState("visitante");
   const [permisosInvitados, setPermisosInvitados] = useState<string[]>([]);
@@ -60,6 +62,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
   // Sin sesion la pagina funciona como invitacion: no se muestra la navegacion del portal.
   const [haySesion, setHaySesion] = useState(() => Boolean(obtenerTokenSesion()));
   const [ventanaAbierta, setVentanaAbierta] = useState<"datos" | "salon" | "galeria" | null>(null);
+  const [campoInicial, setCampoInicial] = useState<string>();
   const [subiendoPortada, setSubiendoPortada] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [avisoError, setAvisoError] = useState<string | null>(null);
@@ -67,6 +70,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
 
   const cargar = useCallback(async () => {
     if (!slug) return;
+    setPermisosCargados(false);
     setError(null);
     try {
       const response = await api.get<Evento>(`/eventos/${slug}`);
@@ -74,6 +78,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
     } catch { setError("No encontramos este evento o todavia no fue confirmado."); }
     if (!obtenerTokenSesion()) {
       setEsAdministrador(false); setHaySesion(false); setUsuario(null); setEditando(false); setPermisosInvitados([]);
+      setPermisosCargados(true);
       return;
     }
     try {
@@ -84,6 +89,8 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
       if (!data.puede_editar) setEditando(false);
     } catch {
       setEsAdministrador(false); setHaySesion(false); setUsuario(null); setEditando(false); setPermisosInvitados([]);
+    } finally {
+      setPermisosCargados(true);
     }
   }, [slug]);
 
@@ -117,13 +124,6 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
     setVentanaAbierta(null);
     cargar();
   }, [alCambiarSesion, cargar]);
-
-  const alGuardar = (actualizado: Evento) => {
-    setEvento(actualizado);
-    setVentanaAbierta(null);
-    setAvisoError(null);
-    setAviso("Cambios guardados.");
-  };
 
   const subirPortada = useCallback(
     async (original: File) => {
@@ -204,8 +204,8 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
         }}>Publicar evento</button>}
         <span className="evento-usuario">{usuario.email}<small>{rol === "visitante" ? "Visitante - sin permisos de edicion" : rol}</small></span>
         {esAdministrador && <button className="secondary-button" onClick={() => { setEditando(!editando); setAviso(null); }}>{editando ? "Ver invitacion" : "Editar evento"}</button>}
-        {permisosInvitados.some(p => ["ver_invitados", "configurar_invitados", "roles", "estadisticas"].includes(p)) && <Link className="secondary-button" to={`/e/${slug}/invitados`}>Gestion de invitados</Link>}
-        {permisosInvitados.includes("control_ingreso") && <Link className="secondary-button" to={`/e/${slug}/control-ingreso`}>Control de ingreso</Link>}
+        {permisosInvitados.some(p => ["ver_invitados", "configurar_invitados", "roles", "estadisticas"].includes(p)) && <Link className="secondary-button" to={`/${slug}/invitados`}>Gestion de invitados</Link>}
+        {permisosInvitados.includes("control_ingreso") && <Link className="secondary-button" to={`/${slug}/control-ingreso`}>Control de ingreso</Link>}
       </> : <button className="secondary-button" onClick={() => setIngresoAbierto(true)}>Ingresar al evento</button>}
     </>);
     actualizarAlCerrarSesion(salir);
@@ -239,6 +239,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
   const template =
     eventTemplates[evento.template_key as EventTemplateKey] ?? eventTemplates.classic;
   const salon = evento.salon;
+  const textosSecciones = { ...TEXTOS_SECCIONES_INICIALES, ...evento.textos_secciones };
   const mapa = urlMapaEmbebido({
     latitud: evento.latitud,
     longitud: evento.longitud,
@@ -258,13 +259,33 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
   return (
     <main
       className={`provider-public evento-personalizado con-tipografia ${template.className}`}
+      data-evento-editor="fondo"
+      onDoubleClick={e => {
+        if (!esAdministrador || !permisosCargados || ventanaAbierta || ajuste.editando) return;
+        const objetivo = e.target as Element;
+        if (objetivo.closest("button, a, input, textarea, select, nav, .ventana-fondo, .textos-portada-controles, .confirmacion-invitado, img, iframe")) return;
+        const textoPortada = objetivo.closest<HTMLElement>("[data-texto]")?.dataset.texto;
+        if (!textoPortada && objetivo.closest(".provider-cover")) return;
+        const campo = textoPortada
+          ? ({ titulo: "titulo_visual", fecha: "fecha", lugar: "color_lugar" }[textoPortada] || "texto")
+          : objetivo.closest<HTMLElement>("[data-evento-editor]")?.dataset.eventoEditor || "fondo";
+        e.preventDefault();
+        window.getSelection()?.removeAllRanges();
+        setCampoInicial(campo);
+        setEditando(true);
+        setVentanaAbierta(campo === "ubicacion" ? "salon" : "datos");
+      }}
       style={{ ...estiloTipografia(evento.tipografia), "--evento-fondo": evento.colores.fondo, "--evento-texto": evento.colores.texto, "--evento-acento": evento.colores.acento } as CSSProperties}
     >
       {ingreso}
-      {editando && <p className="evento-modo-edicion" role="status">Modo edicion. Usa los controles para editar. Doble clic en una imagen para cambiarla.</p>}
+      {esAdministrador && editando && <p className="evento-modo-edicion" role="status">Modo edicion. Doble clic en un texto o fondo para editarlo, o en una imagen para cambiarla.</p>}
       <input ref={selectorPortada} accept="image/jpeg,image/png,image/webp" hidden type="file" onChange={cambiarPortada} />
       <div ref={setControlesTextos} />
-      <section className="provider-cover" onDoubleClick={e => { if (esAdministrador && editando && !(e.target as HTMLElement).closest("button, a, nav, .texto-portada, .textos-portada-controles")) elegirImagen("PORTADA"); }}>
+      <section className="provider-cover" onDoubleClick={e => {
+        if (esAdministrador && !ventanaAbierta && !ajuste.editando && !(e.target as Element).closest("button, a, nav, [data-texto], .textos-portada-controles")) {
+          e.stopPropagation(); elegirImagen("PORTADA");
+        }
+      }}>
         <CapasPortada imagen={portada} encuadre={ajuste.encuadreVisible} />
         <TextosPortadaEvento key={`${slug}-${editando}-${ajuste.editando}`} configuracion={evento.textos_portada}
           colores={evento.colores_textos}
@@ -311,7 +332,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
               className="icono-boton flotante"
               title="Editar datos del evento"
               type="button"
-              onClick={() => setVentanaAbierta("datos")}
+              onClick={() => { setCampoInicial(undefined); setVentanaAbierta("datos"); }}
             >
               <Pencil size={20} aria-hidden="true" />
             </button>
@@ -337,28 +358,30 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
         </div>
       )}
 
+      {slug && permisosCargados && <ConfirmacionInvitado key={`${slug}:${token || "cuenta"}`} slug={slug} tokenPersonal={token} conSesion={haySesion}
+        ocultarSinInvitacion={esAdministrador || permisosInvitados.length > 0} alIngresar={() => setIngresoAbierto(true)} />}
       <section className="provider-public-content">
         {(editando || evento.modulos_habilitados.includes("detalles")) && <article className="provider-info">
-          <h2>Detalles del evento</h2>
-          <p>{evento.descripcion ?? "Pronto vas a encontrar mas informacion sobre este evento."}</p>
+          <h2 data-evento-editor="titulo_detalles">{textosSecciones.detalles}</h2>
+          <p data-evento-editor="descripcion">{evento.descripcion ?? "Pronto vas a encontrar mas informacion sobre este evento."}</p>
           <div className="contact-grid">
-            <span>
+            <span data-evento-editor="fecha">
               <CalendarDays size={18} />
               {evento.fecha_inicio ? formatearFecha(evento.fecha_inicio) : "Fecha a confirmar"}
             </span>
             {salon ? (
-              <Link to={`/p/${salon.slug}`}>
+              <Link to={`/${salon.slug}`}>
                 <Building2 size={18} />
                 {salon.nombre_comercial}
               </Link>
             ) : (
-              <span>
+              <span data-evento-editor="ubicacion">
                 <Home size={18} />
                 Mi casa
               </span>
             )}
             {evento.direccion && (
-              <span>
+              <span data-evento-editor="ubicacion">
                 <MapPin size={18} />
                 {[evento.direccion, evento.localidad, evento.provincia].filter(Boolean).join(", ")}
               </span>
@@ -366,8 +389,8 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
           </div>
         </article>}
         {(editando || evento.modulos_habilitados.includes("ubicacion")) && <aside className="provider-side">
-          <h2>Lugar</h2>
-          <p>{nombreLugar}</p>
+          <h2 data-evento-editor="titulo_lugar">{textosSecciones.lugar}</h2>
+          <p data-evento-editor="ubicacion">{nombreLugar}</p>
           <div className="mapa-contenedor">
             {mapa ? (
               <iframe className="mapa-embebido" src={mapa} title="Mapa del lugar" loading="lazy" />
@@ -394,7 +417,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
 
       {avisoError && <p className="form-error evento-avisos" role="alert">{avisoError}</p>}
       {(editando || (evento.modulos_habilitados.includes("galeria") && evento.galeria.length > 0)) && <section className="evento-galeria">
-        <h2>Imagenes del evento</h2>
+        <h2 data-evento-editor="titulo_galeria">{textosSecciones.galeria}</h2>
         {esAdministrador && editando && <p>
           <button className="secondary-button" type="button" onClick={() => setVentanaAbierta("galeria")}>Configurar galeria</button>
           {!evento.modulos_habilitados.includes("galeria") && <span className="galeria-oculta">Oculta en la invitacion publica. Habilitala desde Configurar galeria.</span>}
@@ -404,7 +427,7 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
           alCambiar={id => elegirImagen("GALERIA", id)} />
         {esAdministrador && editando && <><p>{evento.galeria.length} de {evento.limite_galeria} imagenes.</p><button className="secondary-button" disabled={evento.galeria.length >= evento.limite_galeria} onClick={() => elegirImagen("GALERIA")}>Agregar imagen</button></>}
       </section>}
-      {ventanaAbierta === "galeria" && <VentanaGaleriaEvento evento={evento} alGuardar={alGuardar} alCerrar={() => setVentanaAbierta(null)} />}
+      {ventanaAbierta === "galeria" && <VentanaGaleriaEvento evento={evento} alActualizar={setEvento} alCerrar={() => setVentanaAbierta(null)} />}
       {haySesion && !esAdministrador && permisosInvitados.includes("ver_invitados") && <InvitadosPage key={slug} integrado />}
       {imagenPendiente && <Ventana titulo="Cambiar imagen" alCerrar={() => { if (!subiendoPortada) setImagenPendiente(null); }}>
         {preview && <img className="evento-imagen-preview" src={preview} alt="Vista previa de la nueva imagen" />}
@@ -413,10 +436,10 @@ export function EventPublicPage({ alCambiarSesion }: { alCambiarSesion?: () => v
           <button className="action-button" disabled={subiendoPortada} onClick={() => void subirPortada(imagenPendiente)}>{subiendoPortada ? "Guardando..." : "Guardar imagen"}</button></div>
       </Ventana>}
       {ventanaAbierta === "datos" && (
-        <VentanaDatosEvento evento={evento} alGuardar={alGuardar} alCerrar={() => setVentanaAbierta(null)} />
+        <VentanaDatosEvento evento={evento} campoInicial={campoInicial} alActualizar={setEvento} alCerrar={() => setVentanaAbierta(null)} />
       )}
       {ventanaAbierta === "salon" && (
-        <VentanaSalonEvento evento={evento} alGuardar={alGuardar} alCerrar={() => setVentanaAbierta(null)} />
+        <VentanaSalonEvento evento={evento} alActualizar={setEvento} alCerrar={() => setVentanaAbierta(null)} />
       )}
     </main>
   );

@@ -1,13 +1,14 @@
 import { Save } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { api } from "../api/client";
 import { tipografias, useFuentesGoogle } from "../data/tipografias";
 import { eventTemplates } from "../templates/visualTemplates";
-import { mensajeDeError } from "./EdicionProveedor";
 import type { EncuadrePortada } from "./PortadaAjustable";
 import { DatosLugar, lugarParaGuardar, SelectorLugar, validarLugar } from "./SelectorLugar";
 import { Ventana } from "./Ventana";
+import { SelectorFechaHora } from "./SelectorFechaHora";
+import { mensajeGuardado, useGuardadoAutomatico } from "./useGuardadoAutomatico";
 import type { ConfigGaleria } from "./GaleriaEvento";
 import { COLORES_TEXTOS_INICIALES, type ColoresTextos, type TextosPortada } from "./TextosPortada";
 
@@ -25,8 +26,13 @@ export type SalonResumen = {
 };
 
 export type ColoresEvento = { fondo: string; texto: string; acento: string };
+export type TextosSecciones = { detalles: string; lugar: string; galeria: string };
+export const TEXTOS_SECCIONES_INICIALES: TextosSecciones = {
+  detalles: "Detalles del evento", lugar: "Lugar", galeria: "Imagenes del evento"
+};
 
 export type Evento = {
+  textos_secciones?: TextosSecciones;
   colores_textos?: ColoresTextos;
   textos_portada?: TextosPortada | null;
   geoname_id?: number | null;
@@ -59,6 +65,7 @@ export type Evento = {
 };
 
 type CamposEvento = {
+  textos_secciones: TextosSecciones;
   colores_textos: ColoresTextos;
   galeria_config: ConfigGaleria;
   titulo_visual: string;
@@ -73,7 +80,7 @@ type CamposEvento = {
 
 type VentanaEventoProps = {
   evento: Evento;
-  alGuardar: (evento: Evento) => void;
+  alActualizar: (evento: Evento) => void;
   alCerrar: () => void;
 };
 
@@ -93,6 +100,8 @@ function isoAFechaLocal(valor: string | null) {
 
 function guardarEvento(evento: Evento, campos: CamposEvento) {
   const payload = {
+    ...(evento.textos_secciones || JSON.stringify(campos.textos_secciones) !== JSON.stringify(TEXTOS_SECCIONES_INICIALES)
+      ? { textos_secciones: campos.textos_secciones } : {}),
     colores_textos: campos.colores_textos,
     galeria_config: campos.galeria_config,
     titulo_visual: campos.titulo_visual.trim() || null,
@@ -107,8 +116,9 @@ function guardarEvento(evento: Evento, campos: CamposEvento) {
   return api.put<Evento>(`/eventos/${evento.slug}`, payload).then((r) => r.data);
 }
 
-function useFormularioEvento({ evento, alGuardar }: VentanaEventoProps) {
+function useFormularioEvento({ evento, alActualizar, alCerrar }: VentanaEventoProps, validar: (campos: CamposEvento) => string | null) {
   const [campos, setCampos] = useState<CamposEvento>({
+    textos_secciones: { ...TEXTOS_SECCIONES_INICIALES, ...evento.textos_secciones },
     colores_textos: evento.colores_textos ?? COLORES_TEXTOS_INICIALES,
     galeria_config: evento.galeria_config,
     titulo_visual: evento.titulo_visual ?? evento.nombre,
@@ -131,10 +141,29 @@ function useFormularioEvento({ evento, alGuardar }: VentanaEventoProps) {
       longitud: evento.salon ? null : evento.longitud
     }
   });
-  const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const validacion = useRef(validar);
+  validacion.current = validar;
+  const automatico = useGuardadoAutomatico(async (valor: CamposEvento) => {
+    const actualizado = await guardarEvento(evento, valor);
+    alActualizar(actualizado);
+  });
+  const inicial = useRef(campos);
+  useEffect(() => {
+    if (campos === inicial.current) return;
+    const problema = validacion.current(campos);
+    setError(problema);
+    if (!problema) automatico.programar(campos);
+  }, [campos, automatico.programar]);
 
-  const cambiar = (clave: Exclude<keyof CamposEvento, "lugar" | "colores" | "colores_textos" | "modulos_habilitados" | "galeria_config">, valor: string) => {
+  const cerrar = async () => {
+    const problema = validacion.current(campos);
+    if (problema) { setError(problema); return; }
+    if (campos !== inicial.current) automatico.programar(campos);
+    if (await automatico.guardarAhora()) alCerrar();
+  };
+
+  const cambiar = (clave: Exclude<keyof CamposEvento, "lugar" | "colores" | "colores_textos" | "textos_secciones" | "modulos_habilitados" | "galeria_config">, valor: string) => {
     setCampos((actual) => ({ ...actual, [clave]: valor }));
     setError(null);
   };
@@ -144,24 +173,17 @@ function useFormularioEvento({ evento, alGuardar }: VentanaEventoProps) {
     setError(null);
   };
 
-  const enviar = (e: FormEvent<HTMLFormElement>, validar: () => string | null) => {
+  const enviar = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const problema = validar();
-    if (problema) {
-      setError(problema);
-      return;
-    }
-    setGuardando(true);
-    guardarEvento(evento, campos)
-      .then(alGuardar)
-      .catch((err) => setError(mensajeDeError(err)))
-      .finally(() => setGuardando(false));
+    void cerrar();
   };
 
   const cambiarColor = (clave: keyof ColoresEvento, valor: string) =>
     setCampos(actual => ({ ...actual, colores: { ...actual.colores, [clave]: valor } }));
   const cambiarColorTexto = (clave: keyof ColoresTextos, valor: string) =>
     setCampos(actual => ({ ...actual, colores_textos: { ...actual.colores_textos, [clave]: valor } }));
+  const cambiarTextoSeccion = (clave: keyof TextosSecciones, valor: string) =>
+    setCampos(actual => ({ ...actual, textos_secciones: { ...actual.textos_secciones, [clave]: valor } }));
   const cambiarModulo = (clave: string, activo: boolean) =>
     setCampos(actual => ({ ...actual, modulos_habilitados: activo
       ? [...actual.modulos_habilitados, clave] : actual.modulos_habilitados.filter(m => m !== clave) }));
@@ -169,16 +191,18 @@ function useFormularioEvento({ evento, alGuardar }: VentanaEventoProps) {
     setCampos(actual => ({ ...actual, galeria_config: { ...actual.galeria_config, ...cambios } }));
     setError(null);
   };
-  return { campos, cambiar, cambiarColor, cambiarColorTexto, cambiarModulo, cambiarGaleria, cambiarLugar, enviar, guardando, error };
+  return { campos, cambiar, cambiarColor, cambiarColorTexto, cambiarTextoSeccion, cambiarModulo, cambiarGaleria, cambiarLugar, enviar,
+    cerrar, estado: automatico.estado, guardando: automatico.estado === "guardando", error };
 }
 
-function Pie({ guardando, error, alCerrar }: { guardando: boolean; error: string | null; alCerrar: () => void }) {
+function Pie({ guardando, error, alCerrar, estado }: { guardando: boolean; error: string | null; alCerrar: () => void; estado: Parameters<typeof mensajeGuardado>[0] }) {
   return (
     <>
       {error && <p className="form-error wide">{error}</p>}
+      <p className="wide" role={estado === "error" ? "alert" : "status"}>{mensajeGuardado(estado)}</p>
       <div className="ventana-acciones wide">
         <button className="secondary-button" type="button" disabled={guardando} onClick={alCerrar}>
-          Cancelar
+          Cerrar
         </button>
         <button className="action-button" type="submit" disabled={guardando}>
           <Save size={18} aria-hidden="true" />
@@ -189,24 +213,30 @@ function Pie({ guardando, error, alCerrar }: { guardando: boolean; error: string
   );
 }
 
-export function VentanaDatosEvento(props: VentanaEventoProps) {
-  const { campos, cambiar, cambiarColor, cambiarColorTexto, cambiarModulo, enviar, guardando, error } = useFormularioEvento(props);
-  const validar = () => (campos.titulo_visual.trim().length > 180 ? "El titulo admite hasta 180 caracteres." : null);
+export function VentanaDatosEvento(props: VentanaEventoProps & { campoInicial?: string }) {
+  const { campos, cambiar, cambiarColor, cambiarColorTexto, cambiarTextoSeccion, cambiarModulo, enviar, cerrar, estado, guardando, error } = useFormularioEvento(props,
+    campos => campos.titulo_visual.trim().length > 180 ? "El titulo admite hasta 180 caracteres."
+      : Object.values(campos.textos_secciones).some(texto => !texto.trim()) ? "Completa los titulos de las secciones." : null);
+  const formulario = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (!props.campoInicial) return;
+    const campo = formulario.current?.querySelector<HTMLElement>(`[data-editor-campo="${props.campoInicial}"]`);
+    campo?.scrollIntoView({ block: "center" });
+    const control = campo?.matches("input, textarea, select") ? campo : campo?.querySelector<HTMLElement>("input, textarea, select");
+    control?.focus({ preventScroll: true });
+  }, [props.campoInicial]);
   // Se cargan todas las fuentes para que cada opcion se vea con su tipografia real.
   useFuentesGoogle(Object.keys(tipografias));
 
   return (
-    <Ventana titulo="Datos del evento" alCerrar={() => { if (!guardando) props.alCerrar(); }}>
-      <form className="ventana-formulario" onSubmit={(e) => enviar(e, validar)} noValidate>
+    <Ventana titulo="Datos del evento" alCerrar={() => { void cerrar(); }}>
+      <form ref={formulario} className="ventana-formulario" onSubmit={enviar} noValidate>
         <label className="wide">
           Titulo visual de la invitacion
-          <input maxLength={180} value={campos.titulo_visual} onChange={(e) => cambiar("titulo_visual", e.target.value)} />
-          <small>Nombre original: {props.evento.nombre}. URL: /e/{props.evento.slug}. Son permanentes.</small>
+          <input data-editor-campo="titulo_visual" maxLength={180} value={campos.titulo_visual} onChange={(e) => cambiar("titulo_visual", e.target.value)} />
+          <small>Nombre original: {props.evento.nombre}. URL: /{props.evento.slug}. Son permanentes.</small>
         </label>
-        <label>
-          Fecha y hora
-          <input type="datetime-local" value={campos.fecha} onChange={(e) => cambiar("fecha", e.target.value)} />
-        </label>
+        <div data-editor-campo="fecha"><SelectorFechaHora valor={campos.fecha} alCambiar={valor => cambiar("fecha", valor)} /></div>
         <label>
           Estilo de la pagina
           <select value={campos.template_key} onChange={(e) => cambiar("template_key", e.target.value)}>
@@ -219,12 +249,18 @@ export function VentanaDatosEvento(props: VentanaEventoProps) {
         </label>
         <label className="wide">
           Descripcion
-          <textarea value={campos.descripcion} onChange={(e) => cambiar("descripcion", e.target.value)} />
+          <textarea data-editor-campo="descripcion" value={campos.descripcion} onChange={(e) => cambiar("descripcion", e.target.value)} />
         </label>
+        <fieldset className="wide evento-titulos-secciones">
+          <legend>Titulos de las secciones</legend>
+          {([['detalles', 'Detalles del evento'], ['lugar', 'Lugar'], ['galeria', 'Galeria']] as const).map(([clave, etiqueta]) =>
+            <label key={clave}>{etiqueta}<input data-editor-campo={`titulo_${clave}`} maxLength={180}
+              value={campos.textos_secciones[clave]} onChange={e => cambiarTextoSeccion(clave, e.target.value)} /></label>)}
+        </fieldset>
         <fieldset className="wide evento-colores">
           <legend>Colores de la pagina</legend>
           {([['fondo', 'Fondo'], ['texto', 'Texto'], ['acento', 'Acento']] as const).map(([clave, etiqueta]) =>
-            <label key={clave}>{etiqueta}<input type="color" value={campos.colores[clave]} onChange={e => cambiarColor(clave, e.target.value)} /></label>)}
+            <label key={clave}>{etiqueta}<input data-editor-campo={clave} type="color" value={campos.colores[clave]} onChange={e => cambiarColor(clave, e.target.value)} /></label>)}
         </fieldset>
         <fieldset className="wide evento-modulos">
           <legend>Modulos habilitados</legend>
@@ -254,7 +290,7 @@ export function VentanaDatosEvento(props: VentanaEventoProps) {
           <legend>Colores de los textos de la invitacion</legend>
           {([['titulo', 'Titulo'], ['fecha', 'Fecha y hora'], ['lugar', 'Lugar']] as const).map(([clave, etiqueta]) =>
             <div className="paleta-texto" key={clave}>
-              <label>{etiqueta}<input type="color" value={campos.colores_textos[clave]} onChange={e => cambiarColorTexto(clave, e.target.value)} /></label>
+              <label>{etiqueta}<input data-editor-campo={`color_${clave}`} type="color" value={campos.colores_textos[clave]} onChange={e => cambiarColorTexto(clave, e.target.value)} /></label>
               <div className="paleta-muestras" role="group" aria-label={`Paleta para ${etiqueta.toLowerCase()}`}>
                 {([['#ffffff', 'Blanco'], ['#18212f', 'Oscuro'], ['#f6c453', 'Dorado'], ['#ef4444', 'Rojo'], ['#f472b6', 'Rosa'], ['#8b5cf6', 'Violeta'], ['#38bdf8', 'Celeste'], ['#34d399', 'Verde']] as const).map(([color, nombre]) =>
                   <button key={color} type="button" title={nombre} aria-label={`${nombre} para ${etiqueta.toLowerCase()}`} aria-pressed={campos.colores_textos[clave].toLowerCase() === color}
@@ -268,36 +304,36 @@ export function VentanaDatosEvento(props: VentanaEventoProps) {
             </div>)}
           <p>Elegí una muestra o un color personalizado. Se aplica a la portada y a la foto enviada de la invitacion.</p>
         </fieldset>
-        <Pie guardando={guardando} error={error} alCerrar={props.alCerrar} />
+        <Pie guardando={guardando} error={error} estado={estado} alCerrar={() => { void cerrar(); }} />
       </form>
     </Ventana>
   );
 }
 
 export function VentanaSalonEvento(props: VentanaEventoProps) {
-  const { campos, cambiarLugar, enviar, guardando, error } = useFormularioEvento(props);
+  const { campos, cambiarLugar, enviar, cerrar, estado, guardando, error } = useFormularioEvento(props, campos => validarLugar(campos.lugar));
 
   return (
-    <Ventana titulo="Lugar del evento" alCerrar={() => { if (!guardando) props.alCerrar(); }}>
-      <form className="ventana-formulario" onSubmit={(e) => enviar(e, () => validarLugar(campos.lugar))} noValidate>
+    <Ventana titulo="Lugar del evento" alCerrar={() => { void cerrar(); }}>
+      <form className="ventana-formulario" onSubmit={enviar} noValidate>
         <SelectorLugar valor={campos.lugar} alCambiar={cambiarLugar} />
-        <Pie guardando={guardando} error={error} alCerrar={props.alCerrar} />
+        <Pie guardando={guardando} error={error} estado={estado} alCerrar={() => { void cerrar(); }} />
       </form>
     </Ventana>
   );
 }
 
 export function VentanaGaleriaEvento(props: VentanaEventoProps) {
-  const { campos, cambiarGaleria, cambiarModulo, enviar, guardando, error } = useFormularioEvento(props);
-  const config = campos.galeria_config;
-  const validar = () => {
+  const { campos, cambiarGaleria, cambiarModulo, enviar, cerrar, estado, guardando, error } = useFormularioEvento(props, campos => {
+    const config = campos.galeria_config;
     if (config.modo === "grilla" && (!Number.isInteger(config.filas) || !Number.isInteger(config.columnas)
       || config.filas < 1 || config.columnas < 1 || config.filas * config.columnas > 10))
       return "Elegi filas y columnas con un maximo de 10 espacios por pagina.";
     return null;
-  };
-  return <Ventana titulo="Configurar imagenes de la invitacion" alCerrar={() => { if (!guardando) props.alCerrar(); }}>
-    <form className="ventana-formulario" onSubmit={e => enviar(e, validar)}>
+  });
+  const config = campos.galeria_config;
+  return <Ventana titulo="Configurar imagenes de la invitacion" alCerrar={() => { void cerrar(); }}>
+    <form className="ventana-formulario" onSubmit={enviar}>
       <label className="wide galeria-visible"><input type="checkbox" checked={campos.modulos_habilitados.includes("galeria")}
         onChange={e => cambiarModulo("galeria", e.target.checked)} /> Mostrar imagenes en la invitacion publica</label>
       <label className="wide">Presentacion
@@ -311,7 +347,7 @@ export function VentanaGaleriaEvento(props: VentanaEventoProps) {
         <p className="wide">{config.filas * config.columnas} espacios por pagina (hasta 10). Si hay mas imagenes, se pueden recorrer con Anterior y Siguiente. En celulares se ajustan las columnas al ancho disponible.</p>
       </> : <p className="wide">Una imagen por vez, con flechas, indicadores y deslizamiento en celulares.</p>}
       <p className="wide">Hasta 10 imagenes. Al agregar una imagen, la galeria se habilita automaticamente en la invitacion.</p>
-      <Pie guardando={guardando} error={error} alCerrar={props.alCerrar} />
+      <Pie guardando={guardando} error={error} estado={estado} alCerrar={() => { void cerrar(); }} />
     </form>
   </Ventana>;
 }

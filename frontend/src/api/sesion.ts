@@ -7,6 +7,20 @@ export function guardarValidacionEmail(token: string) { try { sessionStorage.set
 export function obtenerValidacionEmail() { try { return sessionStorage.getItem(CLAVE_VALIDACION); } catch { return null; } }
 let activa: { base: string; token: string } | null = null;
 
+export function abrirPestanaConSesion(url: string, invitacion?: { slug: string; token: string; sesion?: string }): boolean {
+  const nueva = window.open("about:blank", "_blank");
+  if (!nueva) return false;
+  try {
+    const token = obtenerTokenSesion();
+    const base = localStorage.getItem(CLAVE_SESION);
+    if (token && base) nueva.sessionStorage.setItem(CLAVE_CUENTA, JSON.stringify({ base, token }));
+    if (invitacion) nueva.sessionStorage.setItem(`eventos_album_invitacion:${invitacion.slug}`, JSON.stringify({ token: invitacion.token, sesion: invitacion.sesion }));
+    nueva.opener = null;
+    nueva.location.replace(url);
+    return true;
+  } catch { nueva.close(); return false; }
+}
+
 export function obtenerTokenSesion(): string | null {
   try {
     // localStorage.getItem: lee un valor guardado en el navegador (persiste entre pestañas)

@@ -8,6 +8,7 @@ import { guardarTokenSesion, guardarValidacionEmail, obtenerValidacionEmail, sel
 import { GoogleSignIn } from "../components/GoogleSignIn";
 
 type AccessOption = {
+  roles?: string[];
   token?: string | null;
   tipo: "proveedor" | "evento" | "administracion";
   id: number;
@@ -199,6 +200,7 @@ export function LoginPage() {
                   <span>
                     <strong>{option.nombre}</strong>
                     <small>{option.tipo === "administracion" ? "Superadministrador" : option.tipo === "proveedor" ? "Proveedor" : "Evento"}</small>
+                    {!!option.roles?.length && <span className="access-option-roles">Rol: {option.roles.join(" · ")}</span>}
                   </span>
                 </button>
               ))}

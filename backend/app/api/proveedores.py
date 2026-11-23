@@ -71,7 +71,7 @@ def create_proveedor_endpoint(
     propietario = db.get(User, proveedor.usuario_id)
     error_correo = None
     try:
-        enviada = enviar_bienvenida_una_vez(db, propietario, f"/p/{proveedor.slug}")
+        enviada = enviar_bienvenida_una_vez(db, propietario, f"/{proveedor.slug}")
     except HTTPException as exc:
         if exc.status_code != 503:
             raise

@@ -67,7 +67,7 @@ def _send_email(to_email: str | None, subject: str, html: str, text: str, *, att
 def send_provider_confirmation_email(proveedor: Proveedor) -> None:
     if not proveedor.email:
         return
-    edit_url = _build_login_url(proveedor.email, f"/p/{proveedor.slug}", proveedor.usuario_id)
+    edit_url = _build_login_url(proveedor.email, f"/{proveedor.slug}", proveedor.usuario_id)
     subject = f"Confirma tu proveedor {proveedor.nombre_comercial}"
     text = (
         f"Guardamos tu proveedor {proveedor.nombre_comercial}.\n\n"
@@ -85,7 +85,7 @@ def send_provider_confirmation_email(proveedor: Proveedor) -> None:
 def send_provider_edit_access_email(proveedor: Proveedor) -> None:
     if not proveedor.email:
         return
-    edit_url = _build_login_url(proveedor.email, f"/p/{proveedor.slug}", proveedor.usuario_id)
+    edit_url = _build_login_url(proveedor.email, f"/{proveedor.slug}", proveedor.usuario_id)
     subject = f"Acceso para editar {proveedor.nombre_comercial}"
     text = (
         f"Solicitaste editar {proveedor.nombre_comercial}.\n\n"
@@ -131,7 +131,7 @@ def send_welcome_email(email: str, token: str, destino: str | None = None) -> No
 
 def send_event_confirmation_email(evento: Evento, email: str) -> None:
     token = crear_token_confirmacion_evento(evento.slug, email)
-    edit_url = _build_url(f"/e/{evento.slug}?confirmar={token}")
+    edit_url = _build_url(f"/{evento.slug}?confirmar={token}")
     lugar = evento.salon.nombre_comercial if evento.salon else "Mi casa"
     if evento.direccion:
         lugar += f" ({evento.direccion}, {evento.localidad})"
